@@ -23,6 +23,10 @@ module.exports = {
     ],
     "rules": {
         "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-non-null-assertion": "off",
+        "require-jsdoc": "off",
+        "max-len": ["error", {"code": 120}],
+        "no-multi-spaces": ["error", {"ignoreEOLComments": true}],
     },
     "env": {
         "browser": true,

@@ -3,6 +3,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default {
   base: './',
+  server: {
+    watch: {
+      ignored: ['**/log-inputs/**', '**/.notes/**'],
+    },
+  },
   plugins: [
     eslint(),
     VitePWA({

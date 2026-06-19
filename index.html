@@ -1,99 +1,347 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meshtastic Log Analyser</title>
   <style>
+    :root {
+      --bg:       #111827;
+      --surface:  #1f2937;
+      --surface2: #374151;
+      --border:   #374151;
+      --green:    #67EA94;
+      --green-bg: rgba(103,234,148,0.12);
+      --text:     #f3f4f6;
+      --muted:    #6b7280;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body {
-      padding: 0;
-      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
     }
-    * {
-      box-sizing: border-box;
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
     }
-    #terminal {
-      height: 90vh;
+    .title { font-weight: 700; color: var(--green); letter-spacing: 0.01em; }
+    .title-sub { color: var(--muted); }
+    .sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; flex-shrink: 0; }
+    .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+    /* Status dot */
+    #statusDot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0; transition: background 0.3s;
     }
-    .options {
-      padding: 0.75em;
+    #statusDot.connected {
+      background: var(--green);
+      box-shadow: 0 0 7px var(--green);
+      animation: pulse 2s ease-in-out infinite;
     }
-    .info {
-      float: right;
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.45; } }
+
+    /* ── Advanced panel ── */
+    #advanced {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 6px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .filter-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; }
+
+    /* ── Terminal ── */
+    #terminal { flex: 1; min-height: 0; }
+
+    /* ── Common controls ── */
+    label { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 4px; }
+
+    select, input[type="number"], input[type="text"] {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 12px;
+      outline: none;
+    }
+    select:focus, input:focus { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+
+    .btn {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--green); background: var(--green-bg); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
     #connect {
-      margin-right: 2em;
+      background: var(--green-bg);
+      color: var(--green);
+      border-color: var(--green);
+      font-weight: 600;
     }
-    label.checkbox {
-      margin-right: 1em;
+    #connect:hover { background: var(--green); color: #111827; }
+
+    .btn-active {
+      background: var(--green-bg) !important;
+      color: var(--green) !important;
+      border-color: var(--green) !important;
     }
+
+    /* Level filter buttons */
+    .level-btn {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: monospace;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .level-btn[data-level="D"].active { background: rgba(6,182,212,0.15);   color: #06b6d4; border-color: #06b6d4; }
+    .level-btn[data-level="I"].active { background: rgba(103,234,148,0.15); color: #67EA94; border-color: #67EA94; }
+    .level-btn[data-level="W"].active { background: rgba(245,158,11,0.15);  color: #f59e0b; border-color: #f59e0b; }
+    .level-btn[data-level="E"].active { background: rgba(239,68,68,0.15);   color: #ef4444; border-color: #ef4444; }
+    .level-btn[data-level="C"].active { background: rgba(220,38,38,0.2);    color: #dc2626; border-color: #dc2626; }
+
+    .module-buttons { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .module-btn {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: monospace;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .module-btn.active { background: rgba(167,139,250,0.15); color: #a78bfa; border-color: #a78bfa; }
+    #polyfill_switcher { color: var(--muted); font-size: 11px; text-decoration: none; }
+    #polyfill_switcher:hover { color: var(--text); }
+
+    /* ── Summary panel ── */
+    .summary-panel {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      flex-shrink: 0;
+    }
+    .summary-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 0.06em;
+    }
+    .summary-header button {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 0;
+    }
+    .summary-header button:hover { color: var(--text); }
+    #summaryContent {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .device-img {
+      width: 72px;
+      height: 72px;
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: drop-shadow(0 0 6px rgba(103,234,148,0.2));
+      opacity: 0.9;
+    }
+    .sum-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 2px 24px;
+      flex: 1;
+      min-width: 0;
+    }
+    .sum-row {
+      display: flex;
+      gap: 8px;
+      font-size: 12px;
+      line-height: 1.6;
+      min-width: 0;
+    }
+    .sum-label {
+      color: var(--muted);
+      flex-shrink: 0;
+      width: 80px;
+      text-align: right;
+    }
+    .sum-value { color: var(--text); }
+    .sum-value code {
+      font-family: monospace;
+      font-size: 11px;
+      background: var(--surface2);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+    .sum-tag {
+      font-size: 10px;
+      background: var(--green-bg);
+      color: var(--green);
+      border: 1px solid rgba(103,234,148,0.3);
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-weight: 600;
+    }
+    .sum-warn { color: #f59e0b; font-weight: 600; }
+    .sum-err  { color: #ef4444; font-weight: 600; }
+    .sum-divider {
+      grid-column: 1 / -1;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      margin-top: 5px;
+      padding-top: 5px;
+      border-top: 1px solid var(--border);
+    }
+    .sum-divider-err { color: #f87171; border-color: rgba(239,68,68,0.3); }
   </style>
 </head>
 <body>
-<div class="options">
-  <label for="ports">Port:</label>
-  <select id="ports">
-    <option value="prompt">Click 'Connect' to add a port...</option>
-  </select>
-  <button id="connect">Connect</button>
 
-  <button id="download">Download output</button>
-  <button id="clear">Clear output</button>
-  <button id="break">Send break</button>
-
-  <div class="info">
-    <a id="polyfill_switcher"></a>
+  <!-- ── Main toolbar ── -->
+  <div class="toolbar">
+    <div id="statusDot"></div>
+    <span class="title">Meshtastic</span>
+    <span class="title-sub">Log Analyser</span>
+    <div class="sep"></div>
+    <label for="ports">Port</label>
+    <select id="ports">
+      <option value="prompt">— select port —</option>
+    </select>
+    <button id="connect" class="btn">Connect</button>
+    <div class="sep"></div>
+    <label for="baudrate">Baud</label>
+    <select id="baudrate">
+      <option value="9600">9600</option>
+      <option value="19200">19200</option>
+      <option value="38400">38400</option>
+      <option value="57600">57600</option>
+      <option value="115200" selected>115200</option>
+      <option value="230400">230400</option>
+      <option value="460800">460800</option>
+      <option value="921600">921600</option>
+      <option value="custom">Custom…</option>
+    </select>
+    <input id="custom_baudrate" type="number" min="1" placeholder="baud…" hidden style="width:90px">
+    <div class="toolbar-right">
+      <button id="advanced_toggle" class="btn" style="font-size:11px">Advanced ▾</button>
+      <a id="polyfill_switcher"></a>
+    </div>
   </div>
 
-  <br>
-
-  <label for="baudrate">Baud rate:</label>
-  <select id="baudrate">
-    <option value="9600">9600</option>
-    <option value="14400">14400</option>
-    <option value="19200">19220</option>
-    <option value="28800">28800</option>
-    <option value="38400">38400</option>
-    <option value="57600">57600</option>
-    <option value="115200" selected>115200</option>
-    <option value="230400">230400</option>
-    <option value="460800">460800</option>
-    <option value="921600">921600</option>
-    <option value="custom">Custom</option>
-  </select>
-  <input id="custom_baudrate" type="number" min="1" placeholder="Enter baudrate..." hidden>
-  <label for="databits">Data bits:</label>
-  <select id="databits">
-    <option value="7">7</option>
-    <option value="8" selected>8</option>
-  </select>
-  <label for="parity">Parity:</label>
-  <select id="parity">
-    <option value="none" selected>None</option>
-    <option value="even">Even</option>
-    <option value="odd">Odd</option>
-  </select>
-  <label for="stopbits">Stop bits:</label>
-  <select id="stopbits">
-    <option value="1" selected>1</option>
-    <option value="2">2</option>
-  </select>
-  <input id="rtscts" type="checkbox">
-  <label for="rtscts">Hardware flow control</label>
-
-  <br>
-
-  <input id="echo" type="checkbox">
-  <label class="checkbox" for="echo">Local echo</label>
-  <input id="enter_flush" type="checkbox">
-  <label class="checkbox" for="enter_flush">Flush on enter</label>
-  <input id="convert_eol" type="checkbox">
-  <label class="checkbox" for="convert_eol">Convert EOL</label>
-  <input id="autoconnect" type="checkbox">
-  <label class="checkbox" for="autoconnect">Automatically connect</label>
-
-  <div class="info">
-    <a href="https://github.com/GoogleChromeLabs/serial-terminal">Source Code on GitHub</a>
+  <!-- ── Advanced serial settings (hidden by default) ── -->
+  <div id="advanced" hidden>
+    <label for="databits">Data bits
+      <select id="databits">
+        <option value="7">7</option>
+        <option value="8" selected>8</option>
+      </select>
+    </label>
+    <label for="parity">Parity
+      <select id="parity">
+        <option value="none" selected>None</option>
+        <option value="even">Even</option>
+        <option value="odd">Odd</option>
+      </select>
+    </label>
+    <label for="stopbits">Stop bits
+      <select id="stopbits">
+        <option value="1" selected>1</option>
+        <option value="2">2</option>
+      </select>
+    </label>
+    <label><input id="rtscts" type="checkbox"> HW flow control</label>
+    <label><input id="autoconnect" type="checkbox"> Auto-connect</label>
   </div>
-</div>
-<div id="terminal"></div>
-<script type="module" src="/src/index.ts"></script>
+
+  <!-- ── Filter bar ── -->
+  <div class="filter-bar">
+    <span class="filter-label">LEVEL</span>
+    <button class="level-btn active" data-level="D">DBG</button>
+    <button class="level-btn active" data-level="I">INF</button>
+    <button class="level-btn active" data-level="W">WRN</button>
+    <button class="level-btn active" data-level="E">ERR</button>
+    <button class="level-btn active" data-level="C">CRT</button>
+    <div class="sep"></div>
+    <span class="filter-label">MODULE</span>
+    <div id="module_buttons" class="module-buttons"></div>
+    <div class="sep"></div>
+    <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF</button>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button id="save"  class="btn">⬇ Save</button>
+      <button id="clear" class="btn">⬜ Clear</button>
+    </div>
+  </div>
+
+  <!-- ── Device summary (auto-shown when info extracted) ── -->
+  <div class="summary-panel" hidden>
+    <div class="summary-header">
+      ⓘ DEVICE SUMMARY
+      <button id="summary_hide" title="Hide">✕</button>
+    </div>
+    <div id="summaryContent"></div>
+  </div>
+
+  <!-- ── Terminal ── -->
+  <div id="terminal"></div>
+
+  <script type="module" src="/src/index.ts"></script>
 </body>
 </html>
