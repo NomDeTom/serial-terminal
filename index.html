@@ -190,6 +190,29 @@
       padding: 0;
     }
     .summary-header button:hover { color: var(--text); }
+    [data-tooltip] { position: relative; cursor: help; }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 3px);
+      left: 0;
+      background: #1f2937;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 11px;
+      font-style: normal;
+      font-weight: 400;
+      padding: 4px 8px;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 100;
+      max-width: 360px;
+      white-space: normal;
+      line-height: 1.5;
+    }
+    [data-tooltip]:hover::after { opacity: 1; }
     #summaryContent {
       display: flex;
       align-items: flex-start;
@@ -364,7 +387,8 @@
       </select>
     </label>
     <label><input id="rtscts" type="checkbox"> HW flow control</label>
-    <label><input id="autoconnect" type="checkbox"> Auto-connect</label>
+    <label><input id="reconnect" type="checkbox" checked> Reconnect to device</label>
+    <label><input id="grab_next" type="checkbox"> Grab next available</label>
   </div>
 
   <!-- ── Filter bar ── -->

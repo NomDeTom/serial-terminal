@@ -39,11 +39,13 @@ let dataBitsSelector: HTMLSelectElement;
 let paritySelector: HTMLSelectElement;
 let stopBitsSelector: HTMLSelectElement;
 let flowControlCheckbox: HTMLInputElement;
-let autoconnectCheckbox: HTMLInputElement;
+let reconnectCheckbox: HTMLInputElement;
+let grabNextCheckbox: HTMLInputElement;
 let statusDot: HTMLElement;
 
 let portCounter = 1;
 let port: SerialPort | SerialPortPolyfill | undefined;
+let reconnectPort: SerialPort | SerialPortPolyfill | undefined;
 let reader: ReadableStreamDefaultReader | ReadableStreamBYOBReader | undefined;
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -310,9 +312,11 @@ async function connectToPort(): Promise<void> {
   }
 
   if (port) {
+    const droppedPort = port;
     try {
-      await port.close();
+      await droppedPort.close();
     } catch {/* ignore */}
+    if (reconnectCheckbox?.checked) reconnectPort = droppedPort;
     markDisconnected();
   }
 }
@@ -348,7 +352,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   paritySelector = document.getElementById('parity') as HTMLSelectElement;
   stopBitsSelector = document.getElementById('stopbits') as HTMLSelectElement;
   flowControlCheckbox = document.getElementById('rtscts') as HTMLInputElement;
-  autoconnectCheckbox = document.getElementById('autoconnect') as HTMLInputElement;
+  reconnectCheckbox = document.getElementById('reconnect') as HTMLInputElement;
+  grabNextCheckbox = document.getElementById('grab_next') as HTMLInputElement;
 
   connectButton.addEventListener('click', () => {
     if (port) disconnectFromPort();
@@ -425,8 +430,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (!usePolyfill) {
     navigator.serial.addEventListener('connect', (event) => {
-      const portOption = addNewPort(event.target as SerialPort);
-      if (autoconnectCheckbox.checked) {
+      const p = event.target as SerialPort;
+      const portOption = maybeAddNewPort(p);
+      if (reconnectCheckbox.checked && p === reconnectPort) {
+        reconnectPort = undefined;
+        portOption.selected = true;
+        connectToPort();
+      } else if (grabNextCheckbox.checked && !port) {
         portOption.selected = true;
         connectToPort();
       }
