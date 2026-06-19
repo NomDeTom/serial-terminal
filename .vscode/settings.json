@@ -1,0 +1,10 @@
+{
+  "VsCodeTaskButtons.showCounter": false,
+  "VsCodeTaskButtons.tasks": [
+    {
+      "label": "$(play) Dev",
+      "task": "Dev Server",
+      "tooltip": "npm run dev"
+    }
+  ]
+}
