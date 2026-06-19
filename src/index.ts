@@ -10,7 +10,7 @@ import '@xterm/xterm/css/xterm.css';
 import {serial as polyfill, SerialPort as SerialPortPolyfill} from 'web-serial-polyfill';
 import {PiiFilter} from './piiFilter';
 import {parseLine, colorize, preprocessLine} from './logParser';
-import {DeviceSummary, emptySummary, updateSummary, renderSummary} from './logSummary';
+import {DeviceSummary, emptySummary, updateSummary, renderSummary, renderHopChart} from './logSummary';
 import {initDeviceInfo} from './deviceInfo';
 
 declare class PortOption extends HTMLOptionElement {
@@ -28,6 +28,7 @@ const hiddenModules = new Set<string>(); // modules toggled off (empty = all vis
 let lineBuffer = '';                     // accumulates a partial line between chunks
 let summary: DeviceSummary = emptySummary();
 let summaryEl: HTMLElement;
+let hopChartEl: HTMLElement;
 let moduleBtnsEl: HTMLElement;
 
 let portSelector: HTMLSelectElement;
@@ -96,20 +97,27 @@ function addModuleButton(key: string): void {
   moduleBtnsEl.appendChild(btn);
 }
 
+function renderLine(clean: string): string {
+  if (piiFilter.enabled) {
+    return piiFilter.highlightPlaceholders(colorize(piiFilter.filter(clean)));
+  }
+  return piiFilter.annotate(colorize(clean));
+}
+
 function addLine(raw: string): void {
-  const clean = preprocessLine(raw);     // strip ANSI + systemd prefix before storing
-  const filtered = piiFilter.filter(clean);
+  const clean = preprocessLine(raw);   // strip ANSI + systemd prefix; stored unfiltered
   if (lineHistory.length >= MAX_HISTORY) lineHistory.shift();
-  lineHistory.push(filtered);
-  updateSummary(filtered, summary);
+  lineHistory.push(clean);
+  updateSummary(clean, summary);
   refreshSummary();
-  const key = moduleKey(parseLine(filtered).module);
+  refreshHopChart();
+  const key = moduleKey(parseLine(clean).module);
   if (!seenModules.has(key)) {
     seenModules.add(key);
     addModuleButton(key);
   }
-  if (linePassesFilter(filtered)) {
-    term.writeln(colorize(filtered));
+  if (linePassesFilter(clean)) {
+    term.writeln(renderLine(clean));
   }
 }
 
@@ -122,11 +130,20 @@ function refreshSummary(): void {
   }
 }
 
+function refreshHopChart(): void {
+  if (!hopChartEl) return;
+  const html = renderHopChart(summary);
+  if (html) {
+    hopChartEl.innerHTML = html;
+    hopChartEl.closest<HTMLElement>('.hop-chart-panel')!.hidden = false;
+  }
+}
+
 function rerender(): void {
   term.clear();
   for (const line of lineHistory) {
     if (linePassesFilter(line)) {
-      term.writeln(colorize(line));
+      term.writeln(renderLine(line));
     }
   }
 }
@@ -164,7 +181,10 @@ function maybeAddNewPort(p: SerialPort | SerialPortPolyfill): PortOption {
 
 function saveLog(): void {
   if (lineHistory.length === 0) return;
-  const blob = new Blob([lineHistory.join('\n')], {type: 'text/plain'});
+  const lines = piiFilter.enabled ?
+    lineHistory.map((l) => piiFilter.filter(l)) :
+    lineHistory;
+  const blob = new Blob([lines.join('\n')], {type: 'text/plain'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.download = `meshtastic-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
@@ -185,6 +205,10 @@ function clearLog(): void {
   if (summaryEl) {
     summaryEl.innerHTML = '';
     summaryEl.closest<HTMLElement>('.summary-panel')!.hidden = true;
+  }
+  if (hopChartEl) {
+    hopChartEl.innerHTML = '';
+    hopChartEl.closest<HTMLElement>('.hop-chart-panel')!.hidden = true;
   }
 }
 
@@ -313,6 +337,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('resize', () => fitAddon.fit());
 
   summaryEl = document.getElementById('summaryContent')!;
+  hopChartEl = document.getElementById('hopChartContent')!;
   moduleBtnsEl = document.getElementById('module_buttons')!;
   statusDot = document.getElementById('statusDot')!;
   portSelector = document.getElementById('ports') as HTMLSelectElement;
@@ -360,16 +385,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // PII toggle
   const piiButton = document.getElementById('pii_toggle') as HTMLButtonElement;
+  function updatePiiButton(): void {
+    const on = piiFilter.enabled;
+    const eg = on ?
+      '<span class="pii-eg">lat=[REDACTED] lon=[REDACTED]</span>' :
+      '<span class="pii-eg">lat=52.944 lon=-1.435</span>';
+    piiButton.innerHTML = `🕵️ Hide PII: ${on ? 'ON' : 'OFF'} ${eg}`;
+    piiButton.classList.toggle('btn-active', on);
+  }
+  updatePiiButton();
   piiButton.addEventListener('click', () => {
     piiFilter.enabled = !piiFilter.enabled;
-    piiButton.textContent = `🔒 PII: ${piiFilter.enabled ? 'ON' : 'OFF'}`;
-    piiButton.classList.toggle('btn-active', piiFilter.enabled);
+    updatePiiButton();
+    rerender();
   });
 
   document.getElementById('save')!.addEventListener('click', saveLog);
   document.getElementById('clear')!.addEventListener('click', clearLog);
   document.getElementById('summary_hide')!.addEventListener('click', () => {
     summaryEl.closest<HTMLElement>('.summary-panel')!.hidden = true;
+  });
+  document.getElementById('hop_chart_hide')!.addEventListener('click', () => {
+    hopChartEl.closest<HTMLElement>('.hop-chart-panel')!.hidden = true;
   });
 
   // Polyfill switcher

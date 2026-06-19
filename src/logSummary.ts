@@ -62,6 +62,9 @@ export interface DeviceSummary {
   hopFill?: string;
   hopPolite?: string;
   hopNextRoll?: string;
+  hopPerHop?: number[];
+  hopScaledPerHop?: number[];
+  hopSeenPerHour?: number[];
   // BLE (from NimBLE / Bluefruit logs)
   bleConnections: number;
   bleDisconnections: number;
@@ -262,6 +265,21 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
       s.hopLimit = Number(m[1]); s.hopFill = m[2];
       s.hopPolite = m[3]; s.hopNextRoll = m[4];
     }
+  },
+  // "[HopScaling] [HOPSCALE] nodes perHop: [1 1 3 3 1 0 0 0]"
+  (line, s) => {
+    const m = line.match(/\[HopScaling\].*nodes perHop: \[([^\]]+)\]/);
+    if (m) s.hopPerHop = m[1].trim().split(/\s+/).map(Number);
+  },
+  // "[HopScaling] [HOPSCALE] last scaled perHop: [1 1 3 3 1 0 0 0]"
+  (line, s) => {
+    const m = line.match(/\[HopScaling\].*last scaled perHop: \[([^\]]+)\]/);
+    if (m) s.hopScaledPerHop = m[1].trim().split(/\s+/).map(Number);
+  },
+  // "[HopScaling] [HOPSCALE] scaledSeenPerHour (h0=now): [0 5 3 5 6 6 2 1 1 0 0 1 0]"
+  (line, s) => {
+    const m = line.match(/\[HopScaling\].*scaledSeenPerHour \(h0=now\): \[([^\]]+)\]/);
+    if (m) s.hopSeenPerHour = m[1].trim().split(/\s+/).map(Number);
   },
   // "PowerFSM init, USB power=N" — sets USB state before battery module reports
   (line, s) => {
@@ -540,4 +558,128 @@ export function renderSummary(s: DeviceSummary): string {
     '</div>';
 
   return img + grid;
+}
+
+// ── Hop scaling charts ──────────────────────────────────────────────────────
+
+export function renderHopChart(s: DeviceSummary): string {
+  const hasBar = !!(s.hopPerHop && s.hopScaledPerHop);
+  const hasLine = !!s.hopSeenPerHour;
+  if (!hasBar && !hasLine) return '';
+  const parts: string[] = [];
+  if (hasBar) parts.push(hopBarChart(s.hopPerHop!, s.hopScaledPerHop!));
+  if (hasLine) parts.push(hopLineChart(s.hopSeenPerHour!));
+  return parts.join('');
+}
+
+function svgGridLine(x1: number, x2: number, y: number): string {
+  const ys = y.toFixed(1);
+  return `<line x1="${x1}" x2="${x2}" y1="${ys}" y2="${ys}" stroke="#374151" stroke-width="0.5"/>`;
+}
+
+function svgGridLabel(x: number, y: number, text: string|number): string {
+  const tx = x.toFixed(1);
+  const ty = (y + 3).toFixed(1);
+  return `<text x="${tx}" y="${ty}" text-anchor="end" font-size="8" fill="#6b7280">${text}</text>`;
+}
+
+function renderGridLines(pL: number, cW: number, pT: number, cH: number, maxVal: number): string[] {
+  const out: string[] = [];
+  const tickCount = Math.min(maxVal, 4);
+  for (let t = 0; t <= tickCount; t++) {
+    const v = Math.round((t / tickCount) * maxVal);
+    const y = pT + cH - (v / maxVal) * cH;
+    out.push(svgGridLine(pL, pL + cW, y));
+    out.push(svgGridLabel(pL - 3, y, v));
+  }
+  return out;
+}
+
+function hopBarChart(base: number[], scaled: number[]): string {
+  const W = 220;
+  const H = 110;
+  const pL = 22;
+  const pB = 22;
+  const pT = 8;
+  const pR = 6;
+  const cW = W - pL - pR;
+  const cH = H - pT - pB;
+  const n = base.length;
+  const maxVal = Math.max(1, ...base.map((b, i) => b + (scaled[i] ?? 0)));
+  const barW = cW / n;
+  const gap = Math.max(2, barW * 0.2);
+  const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal);
+
+  for (let i = 0; i < n; i++) {
+    const bv = base[i] ?? 0;
+    const sv = scaled[i] ?? 0;
+    const rx = (pL + i * barW + gap / 2).toFixed(1);
+    const rw = (barW - gap).toFixed(1);
+    const bH = (bv / maxVal) * cH;
+    const sH = (sv / maxVal) * cH;
+    if (bH > 0) {
+      const ry = (pT + cH - bH).toFixed(1);
+      const rh = bH.toFixed(1);
+      parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="#67EA94" opacity="0.85" rx="1"/>`);
+    }
+    if (sH > 0) {
+      const ry = (pT + cH - bH - sH).toFixed(1);
+      const rh = sH.toFixed(1);
+      parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="#a78bfa" opacity="0.75" rx="1"/>`);
+    }
+    const lx = (pL + i * barW + barW / 2).toFixed(1);
+    const ly = (pT + cH + 14).toFixed(1);
+    parts.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">${i}</text>`);
+  }
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') + `</svg>`;
+  const legend = `<div class="hc-legend">` +
+    `<span class="hc-dot" style="background:#67EA94"></span>base` +
+    `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>scaled</div>`;
+  return `<div class="hc-section"><div class="hc-label">Nodes per hop</div>${svg}${legend}</div>`;
+}
+
+function hopLineChart(data: number[]): string {
+  const W = 280;
+  const H = 110;
+  const pL = 22;
+  const pB = 22;
+  const pT = 8;
+  const pR = 6;
+  const cW = W - pL - pR;
+  const cH = H - pT - pB;
+  const pts = [...data].reverse(); // oldest on left, h0=now on right
+  const n = pts.length;
+  const maxVal = Math.max(1, ...pts);
+  const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal);
+
+  const coords = pts.map((v, i) => ({
+    x: pL + (n > 1 ? (i / (n - 1)) * cW : cW / 2),
+    y: pT + cH - (v / maxVal) * cH,
+  }));
+
+  const areaBase = pT + cH;
+  const areaPoints = [
+    `${coords[0].x.toFixed(1)},${areaBase}`,
+    ...coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`),
+    `${coords[n - 1].x.toFixed(1)},${areaBase}`,
+  ].join(' ');
+  parts.push(`<polygon points="${areaPoints}" fill="#67EA94" opacity="0.1"/>`);
+
+  const linePts = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  parts.push(`<polyline points="${linePts}" fill="none" stroke="#67EA94" stroke-width="1.5"/>`);
+
+  const labelEvery = Math.ceil(n / 6);
+  const ly = (pT + cH + 14).toFixed(1);
+  for (let i = 0; i < n; i++) {
+    if (i % labelEvery !== 0 && i !== n - 1) continue;
+    const label = i === n - 1 ? 'now' : `-${n - 1 - i}h`;
+    const lx2 = coords[i].x.toFixed(1);
+    parts.push(`<text x="${lx2}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">${label}</text>`);
+  }
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') + `</svg>`;
+  return `<div class="hc-section"><div class="hc-label">Scaled seen / hour</div>${svg}</div>`;
 }

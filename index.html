@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -160,6 +160,7 @@
     .module-btn.active { background: rgba(167,139,250,0.15); color: #a78bfa; border-color: #a78bfa; }
     #polyfill_switcher { color: var(--muted); font-size: 11px; text-decoration: none; }
     #polyfill_switcher:hover { color: var(--text); }
+    .pii-eg { font-size: 10px; color: var(--muted); font-weight: 400; }
 
     /* ── Summary panel ── */
     .summary-panel {
@@ -251,6 +252,60 @@
       border-top: 1px solid var(--border);
     }
     .sum-divider-err { color: #f87171; border-color: rgba(239,68,68,0.3); }
+
+    /* ── Hop chart panel ── */
+    .hop-chart-panel {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      flex-shrink: 0;
+    }
+    .hop-chart-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 0.06em;
+    }
+    .hop-chart-header button {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 0;
+    }
+    .hop-chart-header button:hover { color: var(--text); }
+    #hopChartContent {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .hc-section { display: flex; flex-direction: column; gap: 4px; }
+    .hc-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+    .hc-legend {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .hc-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+    }
   </style>
 </head>
 <body>
@@ -323,7 +378,7 @@
     <span class="filter-label">MODULE</span>
     <div id="module_buttons" class="module-buttons"></div>
     <div class="sep"></div>
-    <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF</button>
+    <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF <span class="pii-eg">lat=52.944 lon=-1.435</span></button>
     <div style="margin-left:auto;display:flex;gap:6px">
       <button id="save"  class="btn">⬇ Save</button>
       <button id="clear" class="btn">⬜ Clear</button>
@@ -337,6 +392,15 @@
       <button id="summary_hide" title="Hide">✕</button>
     </div>
     <div id="summaryContent"></div>
+  </div>
+
+  <!-- ── Hop scaling charts (auto-shown when hop data extracted) ── -->
+  <div class="hop-chart-panel" id="hopChartPanel" hidden>
+    <div class="hop-chart-header">
+      ◈ HOP SCALING
+      <button id="hop_chart_hide" title="Hide">✕</button>
+    </div>
+    <div id="hopChartContent"></div>
   </div>
 
   <!-- ── Terminal ── -->
