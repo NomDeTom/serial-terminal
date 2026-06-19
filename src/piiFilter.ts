@@ -3,6 +3,12 @@ const KNOWN: Record<string, string> = {
   '00000000': 'NULL',
 };
 
+// ANSI codes used in terminal highlights
+const HI = '\x1b[47m\x1b[30m';  // white bg + black text — marks raw PII values
+const HI0 = '\x1b[0m';
+const PH = '\x1b[33m';          // amber text — marks [REDACTED]/[NODE-N] placeholders
+const PH0 = '\x1b[0m';
+
 export class PiiFilter {
   enabled = false;
   private nodeMap = new Map<string, string>();
@@ -11,14 +17,36 @@ export class PiiFilter {
   filter(text: string): string {
     if (!this.enabled) return text;
     return text
-    // Node IDs: 0xabcdef12 or !abcdef12
+    // Node IDs with 0x or ! prefix → [NODE-N]
         .replace(/(?:0x|!)([0-9a-fA-F]{8})/gi, (_, hex) => `[${this.alias(hex)}]`)
+    // Node IDs with @ prefix (pos@XXXXXXXX) → @[NODE-N]
+        .replace(/@([0-9a-fA-F]{8})/gi, (_, hex) => `@[${this.alias(hex)}]`)
     // JSON long/short names from nodeInfo payloads
         .replace(/"longName"\s*:\s*"[^"]*"/g, '"longName":"[REDACTED]"')
         .replace(/"shortName"\s*:\s*"[^"]*"/g, '"shortName":"[REDACTED]"')
-    // GPS key=value pairs
+    // GPS key=value pairs (decimal or scaled-integer forms)
         .replace(/\blat(?:itude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, 'lat=[REDACTED]')
         .replace(/\blon(?:gitude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, 'lon=[REDACTED]');
+  }
+
+  // Wraps raw PII patterns in ANSI highlight — used in the terminal when PII is OFF
+  // to show what would be redacted. Call this on the already-colorized line.
+  annotate(text: string): string {
+    return text
+        .replace(/(?:0x|!)([0-9a-fA-F]{8})/gi, `${HI}$&${HI0}`)
+        .replace(/@([0-9a-fA-F]{8})/gi, `@${HI}$1${HI0}`)
+        .replace(/"longName"\s*:\s*"[^"]*"/g, `${HI}$&${HI0}`)
+        .replace(/"shortName"\s*:\s*"[^"]*"/g, `${HI}$&${HI0}`)
+        .replace(/\blat(?:itude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, `${HI}$&${HI0}`)
+        .replace(/\blon(?:gitude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, `${HI}$&${HI0}`);
+  }
+
+  // Wraps [REDACTED]/[NODE-N] placeholders in amber — used when PII is ON.
+  highlightPlaceholders(text: string): string {
+    return text.replace(
+        /\[(NODE-\d+|BROADCAST|NULL|REDACTED)\]/g,
+        `${PH}$&${PH0}`,
+    );
   }
 
   private alias(hex: string): string {
