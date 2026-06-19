@@ -1,0 +1,23 @@
+version: 0.1
+cli:
+  version: 1.22.9
+plugins:
+  sources:
+    - id: trunk
+      ref: v1.6.6
+      uri: https://github.com/trunk-io/plugins
+lint:
+  enabled:
+    - eslint@8.57.1
+    - prettier@3.5.3
+    - git-diff-check
+  ignore:
+    - linters: [ALL]
+      paths:
+        - node_modules/**
+        - dist/**
+actions:
+  enabled:
+    - trunk-fmt-pre-commit
+    - trunk-announce
+    - trunk-check-pre-push

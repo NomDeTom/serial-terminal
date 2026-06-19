@@ -30,6 +30,10 @@ let summary: DeviceSummary = emptySummary();
 let summaryEl: HTMLElement;
 let hopChartEl: HTMLElement;
 let moduleBtnsEl: HTMLElement;
+let portChipsEl: HTMLElement | undefined;
+
+interface PortRecord { label: string; status: 'available' | 'gone'; }
+const portHistory = new Map<SerialPort | SerialPortPolyfill, PortRecord>();
 
 let portSelector: HTMLSelectElement;
 let connectButton: HTMLButtonElement;
@@ -169,11 +173,28 @@ function findPortOption(p: SerialPort | SerialPortPolyfill): PortOption | null {
   return null;
 }
 
+function updatePortBar(): void {
+  const el = portChipsEl;
+  if (!el) return;
+  el.innerHTML = '';
+  portHistory.forEach((record, p) => {
+    const chip = document.createElement('span');
+    const isConnected = p === port;
+    const state = isConnected ? 'port-connected' : record.status === 'gone' ? 'port-gone' : 'port-available';
+    chip.className = `port-chip ${state}`;
+    chip.textContent = record.label;
+    el.appendChild(chip);
+  });
+  document.getElementById('port_bar')!.hidden = portHistory.size === 0;
+}
+
 function addNewPort(p: SerialPort | SerialPortPolyfill): PortOption {
   const portOption = document.createElement('option') as PortOption;
   portOption.textContent = `Port ${portCounter++}`;
   portOption.port = p;
   portSelector.appendChild(portOption);
+  portHistory.set(p, {label: portOption.textContent, status: 'available'});
+  updatePortBar();
   return portOption;
 }
 
@@ -237,6 +258,7 @@ function setConnectedUi(connected: boolean): void {
 function markDisconnected(): void {
   setConnectedUi(false);
   port = undefined;
+  updatePortBar();
 }
 
 async function connectToPort(): Promise<void> {
@@ -264,6 +286,7 @@ async function connectToPort(): Promise<void> {
   connectButton.textContent = 'Connecting…';
   connectButton.disabled = true;
   setConnectedUi(true);
+  updatePortBar();
   connectButton.disabled = true; // keep disabled until open succeeds
 
   try {
@@ -339,10 +362,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   term.open(terminalElement);
   fitAddon.fit();
   window.addEventListener('resize', () => fitAddon.fit());
+  window.addEventListener('focus', () => fitAddon.fit());
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) fitAddon.fit();
+  });
 
   summaryEl = document.getElementById('summaryContent')!;
   hopChartEl = document.getElementById('hopChartContent')!;
   moduleBtnsEl = document.getElementById('module_buttons')!;
+  portChipsEl = document.getElementById('port_chips')!;
   statusDot = document.getElementById('statusDot')!;
   portSelector = document.getElementById('ports') as HTMLSelectElement;
   connectButton = document.getElementById('connect') as HTMLButtonElement;
@@ -370,6 +398,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     advancedPanel.hidden = !advancedPanel.hidden;
     (e.currentTarget as HTMLButtonElement).textContent =
       advancedPanel.hidden ? 'Advanced ▾' : 'Advanced ▴';
+  });
+
+  // Module all/none toggle
+  document.getElementById('module_all_none')!.addEventListener('click', (e) => {
+    const allHidden = hiddenModules.size === seenModules.size && seenModules.size > 0;
+    moduleBtnsEl.querySelectorAll<HTMLButtonElement>('.module-btn').forEach((btn) => {
+      const key = btn.dataset['mod']!;
+      if (allHidden) {
+        hiddenModules.delete(key);
+        btn.classList.add('active');
+      } else {
+        hiddenModules.add(key);
+        btn.classList.remove('active');
+      }
+    });
+    (e.currentTarget as HTMLButtonElement).classList.toggle('active', allHidden);
+    rerender();
   });
 
   // Level filter buttons
@@ -432,6 +477,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     navigator.serial.addEventListener('connect', (event) => {
       const p = event.target as SerialPort;
       const portOption = maybeAddNewPort(p);
+      const rec = portHistory.get(p);
+      if (rec) {
+        rec.status = 'available'; updatePortBar();
+      }
       if (reconnectCheckbox.checked && p === reconnectPort) {
         reconnectPort = undefined;
         portOption.selected = true;
@@ -442,7 +491,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
     navigator.serial.addEventListener('disconnect', (event) => {
-      findPortOption(event.target as SerialPort)?.remove();
+      const p = event.target as SerialPort;
+      findPortOption(p)?.remove();
+      const rec = portHistory.get(p);
+      if (rec) {
+        rec.status = 'gone'; updatePortBar();
+      }
     });
   }
 });
