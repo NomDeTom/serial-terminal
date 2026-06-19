@@ -6,5 +6,9 @@
       "task": "Dev Server",
       "tooltip": "npm run dev"
     }
-  ]
+  ],
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.validate": ["typescript"]
 }

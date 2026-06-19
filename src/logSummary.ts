@@ -388,20 +388,31 @@ export function renderSummary(s: DeviceSummary): string {
     s.dutyCycleHits > 0 || s.bleNvsErrors > 0 || s.bleGattFailures > 0;
   if (!s.hardware && !s.firmware && !s.radioType && !hasEvents) return '';
 
-  const rows: Array<[string, string]> = [];
+  const rows: Array<[string, string, string?]> = [];
 
   const hwLabel = s.displayName ?? s.hardware ?? '';
   if (hwLabel) {
     const slug = s.hwModelSlug ? ` <span class="sum-tag">${s.hwModelSlug}</span>` : '';
     const id = s.hwModelId !== undefined && !s.hwModelSlug ?
       ` <span class="sum-tag">model ${s.hwModelId}</span>` : '';
-    rows.push(['Hardware', `${hwLabel}${slug}${id}`]);
+    const hwTt: string[] = [];
+    if (s.displayName && s.hardware) hwTt.push(`Target: ${s.hardware}`);
+    if (s.hwModelId !== undefined) hwTt.push(`Model ID: ${s.hwModelId}`);
+    rows.push(['Hardware', `${hwLabel}${slug}${id}`, hwTt.join(' · ') || undefined]);
   }
   if (s.firmware) {
-    const build = s.buildVariant && s.buildVariant !== 'meshtastic/firmware' ?
-      ` <span class="sum-tag">${s.buildVariant}</span>` : '';
+    const isCustom = !!(s.buildVariant && s.buildVariant !== 'meshtastic/firmware');
+    const build = isCustom ? ` <span class="sum-tag">${s.buildVariant}</span>` : '';
     const date = s.buildDate ? ` <span style="color:var(--muted)">${s.buildDate}</span>` : '';
-    rows.push(['Firmware', `${s.firmware}${build}${date}`]);
+    const cp: string[] = [];
+    if (s.buildVariant === 'meshtastic/firmware') cp.push('Mainline release');
+    else if (isCustom) cp.push('Custom firmware fork');
+    const vl = s.firmware.toLowerCase();
+    if (vl.includes('alpha')) cp.push('alpha pre-release');
+    else if (vl.includes('beta')) cp.push('beta pre-release');
+    else if (vl.includes('rc')) cp.push('release candidate');
+    if (s.buildDate) cp.push(`compiled ${s.buildDate}`);
+    rows.push(['Firmware', `${s.firmware}${build}${date}`, cp.join(' · ') || undefined]);
   }
   if (s.nodeId) rows.push(['Node ID', `<code>${s.nodeId}</code>`]);
 
@@ -417,7 +428,8 @@ export function renderSummary(s: DeviceSummary): string {
 
   if (s.region) {
     const warn = s.region === 'UNSET' ? ' <span class="sum-warn">⚠ not configured</span>' : '';
-    rows.push(['Region', `${s.region}${warn}`]);
+    const tt = s.region === 'UNSET' ? 'Region not set — device will not transmit LoRa' : undefined;
+    rows.push(['Region', `${s.region}${warn}`, tt]);
   }
 
   if (s.gps) rows.push(['GPS', s.gps]);
@@ -430,15 +442,20 @@ export function renderSummary(s: DeviceSummary): string {
     rows.push(['Battery', `${s.batteryPct}%${mv}${usb}${chg}`]);
   }
 
-  if (s.noiseFloor) rows.push(['Noise floor', s.noiseFloor]);
-  if (s.rebootCount !== undefined) rows.push(['Reboots', String(s.rebootCount)]);
+  if (s.noiseFloor) {
+    rows.push(['Noise floor', s.noiseFloor, 'Ambient RSSI noise floor in dBm']);
+  }
+  if (s.rebootCount !== undefined) {
+    rows.push(['Reboots', String(s.rebootCount), 'Device restarts counted in this log session']);
+  }
 
   if (s.bootErrors > 0) {
-    rows.push(['Boot errors', `<span class="sum-warn">${s.bootErrors}</span>`]);
+    rows.push(['Boot errors', `<span class="sum-warn">${s.bootErrors}</span>`,
+      'Hardware initialization failures at startup']);
   }
 
   // ── Module status ──────────────────────────────────────
-  const modRows: Array<[string, string]> = [];
+  const modRows: Array<[string, string, string?]> = [];
 
   if (s.gpsLock !== undefined) {
     const lock = s.gpsLock ? '<span style="color:#67EA94">locked</span>' : 'no lock';
@@ -488,63 +505,80 @@ export function renderSummary(s: DeviceSummary): string {
   }
 
   // ── Events / errors ────────────────────────────────────
-  const evtRows: Array<[string, string]> = [];
+  const evtRows: Array<[string, string, string?]> = [];
 
   if (s.securityWarning) {
-    evtRows.push(['Security', '<span class="sum-err">⚠ key advertised by remote — regenerate keys</span>']);
+    evtRows.push(['Security', '<span class="sum-err">⚠ key advertised by remote — regenerate keys</span>',
+      'A remote node is advertising your network key — regenerate keys immediately to secure the channel']);
   }
   if (s.watchdogReset) {
-    evtRows.push(['Reset', '<span class="sum-err">watchdog reset (intWatchdog)</span>']);
+    evtRows.push(['Reset', '<span class="sum-err">watchdog reset (intWatchdog)</span>',
+      'Firmware crash triggered a hardware watchdog reset']);
   }
   if (s.sslErrors > 0) {
     const plural = s.sslErrors !== 1 ? 's' : '';
     evtRows.push(['SSL',
-      `<span class="sum-err">${s.sslErrors} cert error${plural} — check certificate files</span>`]);
+      `<span class="sum-err">${s.sslErrors} cert error${plural} — check certificate files</span>`,
+      'TLS certificate validation failed — check that cert/key files are valid and not expired']);
   }
   if (hasNak) {
     const parts = Object.entries(s.nakErrors).map(([code, count]) => {
       const name = NAK_ERROR_NAMES[Number(code)] ?? `err${code}`;
       return `${name} ×${count}`;
     }).join(' · ');
-    evtRows.push(['NAK drops', `<span class="sum-warn">${parts}</span>`]);
+    evtRows.push(['NAK drops', `<span class="sum-warn">${parts}</span>`,
+      'Packets acknowledged at the radio layer but rejected by the remote node']);
   }
   if (s.busyRxCount > 0) {
-    // busyRx = radio mid-receive, cannot TX; high counts indicate RF congestion
     const cls = s.busyRxCount > 20 ? 'sum-warn' : '';
     const count = s.busyRxCount > 999 ? '>999' : `×${s.busyRxCount}`;
     const label = s.busyRxCount > 20 ? 'RF congestion' : 'busyRx';
-    evtRows.push([label, cls ? `<span class="${cls}">${count}</span>` : count]);
+    evtRows.push([label, cls ? `<span class="${cls}">${count}</span>` : count,
+      'Radio was mid-receive when a TX was attempted — high counts indicate a congested RF environment']);
   }
   if (s.dutyCycleHits > 0) {
     evtRows.push(['Duty cycle',
-      `<span class="sum-warn">×${s.dutyCycleHits} TX blocked — regulatory limit</span>`]);
+      `<span class="sum-warn">×${s.dutyCycleHits} TX blocked — regulatory limit</span>`,
+      'LoRa duty cycle limit hit (EU regulation) — TX was blocked to stay within the legal airtime cap']);
   }
   if (s.channelDecodeFailures > 0) {
     evtRows.push(['Decode fail',
-      `<span class="sum-warn">×${s.channelDecodeFailures} (unknown channel hash)</span>`]);
+      `<span class="sum-warn">×${s.channelDecodeFailures} (unknown channel hash)</span>`,
+      'Received packets whose channel hash did not match any known channel — likely a mismatched channel key']);
   }
   if (s.powerLossEvents > 0) {
-    evtRows.push(['Power loss', `<span class="sum-warn">×${s.powerLossEvents}</span>`]);
+    evtRows.push(['Power loss', `<span class="sum-warn">×${s.powerLossEvents}</span>`,
+      'Unexpected power interruptions detected in this session']);
   }
   if (s.bleNvsErrors > 0) {
     evtRows.push(['BLE NVS',
-      `<span class="sum-warn">×${s.bleNvsErrors} bonding data corrupted — clear NVS to fix</span>`]);
+      `<span class="sum-warn">×${s.bleNvsErrors} bonding data corrupted — clear NVS to fix</span>`,
+      'Bluetooth bonding data in flash is corrupted — erase NVS partition to restore pairing']);
   }
   if (s.bleGattFailures > 0) {
-    evtRows.push(['BLE GATT', `<span class="sum-warn">×${s.bleGattFailures} connection failed</span>`]);
+    evtRows.push(['BLE GATT', `<span class="sum-warn">×${s.bleGattFailures} connection failed</span>`,
+      'Bluetooth GATT connection establishment failures — may affect app connectivity']);
   }
-  if (s.noHwRng) evtRows.push(['Entropy', 'SW RNG (no hardware radio entropy source)']);
-  if (s.rtcMissing) evtRows.push(['RTC', 'not detected']);
+  if (s.noHwRng) {
+    evtRows.push(['Entropy', 'SW RNG (no hardware radio entropy source)',
+      'No hardware random number generator found — using software entropy (lower security)']);
+  }
+  if (s.rtcMissing) {
+    evtRows.push(['RTC', 'not detected',
+      'Real-time clock not detected — timestamps may be inaccurate until GPS or NTP sync']);
+  }
   // Only show radio probe failures if no radio was ever successfully initialised
   if (s.radioProbeFailures.length && !s.radioType) {
-    evtRows.push(['Radio probe', `failed: ${s.radioProbeFailures.join(', ')}`]);
+    evtRows.push(['Radio probe', `failed: ${s.radioProbeFailures.join(', ')}`,
+      'Radio chip detection failed — check hardware connections and solder joints']);
   }
 
   const img = s.deviceImage ?
     `<img class="device-img" src="/img/devices/${s.deviceImage}" alt="${hwLabel}">` : '';
 
-  function renderRow([label, value]: [string, string]): string {
-    return `<div class="sum-row"><span class="sum-label">${label}</span>` +
+  function renderRow([label, value, tooltip]: [string, string, string?]): string {
+    const tt = tooltip ? ` data-tooltip="${tooltip}"` : '';
+    return `<div class="sum-row"${tt}><span class="sum-label">${label}</span>` +
       `<span class="sum-value">${value}</span></div>`;
   }
 
