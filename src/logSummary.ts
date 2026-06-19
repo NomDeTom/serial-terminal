@@ -18,9 +18,12 @@ export interface DeviceSummary {
   buildDate?: string;      // human-readable from "Build timestamp: <unix>"
   buildVariant?: string;
   nodeId?: string;
+  nodeName?: string;
   // Radio
   radioType?: string;
   radioFirmware?: string;
+  radioTcxo?: string;   // 'TCXO' | 'XTAL'
+  radioVref?: string;   // e.g. '1.8V'
   frequency?: string;
   bandwidth?: string;
   txPower?: string;
@@ -103,6 +106,13 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/S:B:(\d+),([\w.]+),([\w-]+),([\w/.]+)/);
     if (m) {
+      if (s.firmware) {
+        // New boot detected — reset accumulated state so summary reflects only the last session
+        (Object.keys(s) as string[]).forEach((k) => {
+          delete (s as Record<string, unknown>)[k];
+        });
+        Object.assign(s, emptySummary());
+      }
       s.hwModelId = Number(m[1]);
       s.firmware = m[2]; s.hardware = m[3]; s.buildVariant = m[4];
       // Look up by platformio target first, fall back to hwModel integer
@@ -125,7 +135,16 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // "Use nodenum 0x5a165586"
   (line, s) => {
     const m = line.match(/Use nodenum (0x[0-9a-fA-F]+)/);
-    if (m) s.nodeId = m[1];
+    if (m) {
+      s.nodeId = m[1];
+    }
+  },
+  // "owner = NomDeTom (NdTm)" — user-set node long name
+  (line, s) => {
+    const m = line.match(/owner = ([^(]+)/);
+    if (m) {
+      s.nodeName = m[1].trim();
+    }
   },
   // Radio chip: "(chip) init result N" — 0 = success, negative = probe failure
   (line, s) => {
@@ -148,10 +167,25 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const m = line.match(/LR11x0 Device \d+, HW \d+, FW ([\d.]+)/);
     if (m) s.radioFirmware = m[1];
   },
-  // "Radio freq=906.875, ..."
+  // "Radio freq=906.875, ..." or "Frequency set to 869.525024"
   (line, s) => {
-    const m = line.match(/Radio freq=([\d.]+)/);
-    if (m) s.frequency = m[1];
+    const m = line.match(/Radio freq=([\d.]+)/) ?? line.match(/Frequency set to ([\d.]+)/);
+    if (m) {
+      s.frequency = String(Math.round(Number(m[1]) * 1000) / 1000);
+    }
+  },
+  // "SX1262 init success, TCXO, Vref 1.800000V" — refines chip variant and oscillator type
+  (line, s) => {
+    const m = line.match(/(SX\w+) init success(?:, (TCXO|XTAL))?(?:, Vref ([\d.]+)V)?/);
+    if (m) {
+      s.radioType = m[1];
+      if (m[2]) {
+        s.radioTcxo = m[2];
+      }
+      if (m[3]) {
+        s.radioVref = `${Number(m[3]).toFixed(1)}V`;
+      }
+    }
   },
   // "Set radio: region=UNSET, name=LongFast, ..."
   (line, s) => {
@@ -160,10 +194,12 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
       s.region = m[1]; s.modemPreset = m[2];
     }
   },
-  // "Final Tx power: 22 dBm"
+  // "Final Tx power: 22 dBm" or "Power output set to 10"
   (line, s) => {
-    const m = line.match(/Final Tx power: (\d+) dBm/);
-    if (m) s.txPower = m[1];
+    const m = line.match(/Final Tx power: (\d+) dBm/) ?? line.match(/Power output set to (\d+)/);
+    if (m) {
+      s.txPower = s.txPower ?? m[1];
+    }
   },
   // "Bandwidth set to 250.000000"
   (line, s) => {
@@ -390,6 +426,13 @@ export function renderSummary(s: DeviceSummary): string {
 
   const rows: Array<[string, string, string?]> = [];
 
+  if (s.nodeName) {
+    rows.push(['Name', s.nodeName]);
+  }
+  if (s.nodeId) {
+    rows.push(['Node ID', `<code>${s.nodeId}</code>`]);
+  }
+
   const hwLabel = s.displayName ?? s.hardware ?? '';
   if (hwLabel) {
     const slug = s.hwModelSlug ? ` <span class="sum-tag">${s.hwModelSlug}</span>` : '';
@@ -414,11 +457,10 @@ export function renderSummary(s: DeviceSummary): string {
     if (s.buildDate) cp.push(`compiled ${s.buildDate}`);
     rows.push(['Firmware', `${s.firmware}${build}${date}`, cp.join(' · ') || undefined]);
   }
-  if (s.nodeId) rows.push(['Node ID', `<code>${s.nodeId}</code>`]);
-
   if (s.radioType) {
     const parts = [s.radioType];
     if (s.radioFirmware) parts.push(`FW ${s.radioFirmware}`);
+    if (s.radioTcxo) parts.push(s.radioVref ? `${s.radioTcxo} ${s.radioVref}` : s.radioTcxo);
     if (s.frequency) parts.push(`${s.frequency} MHz`);
     if (s.bandwidth) parts.push(`${s.bandwidth} kHz BW`);
     if (s.txPower) parts.push(`${s.txPower} dBm`);

@@ -81,6 +81,34 @@
     }
     .filter-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; }
 
+    /* ── Port bar ── */
+    .port-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+    .port-bar-label { color: var(--muted); font-weight: 600; letter-spacing: 0.05em; margin-right: 2px; }
+    .port-chip {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 3px;
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .port-chip::before { content: '●'; font-size: 7px; }
+    .port-chip.port-connected { color: var(--green); }
+    .port-chip.port-connected::before { color: var(--green); }
+    .port-chip.port-gone { opacity: 0.45; text-decoration: line-through; }
+    .port-chip.port-gone::before { color: #dc2626; }
+
     /* ── Terminal ── */
     #terminal { flex: 1; min-height: 0; }
 
@@ -391,6 +419,12 @@
     <label><input id="grab_next" type="checkbox"> Grab next available</label>
   </div>
 
+  <!-- ── Port history bar (auto-shown when ports are seen) ── -->
+  <div class="port-bar" id="port_bar" hidden>
+    <span class="port-bar-label">PORTS</span>
+    <div id="port_chips"></div>
+  </div>
+
   <!-- ── Filter bar ── -->
   <div class="filter-bar">
     <span class="filter-label">LEVEL</span>
@@ -401,6 +435,7 @@
     <button class="level-btn active" data-level="C">CRT</button>
     <div class="sep"></div>
     <span class="filter-label">MODULE</span>
+    <button id="module_all_none" class="module-btn active" title="Select all / none">±</button>
     <div id="module_buttons" class="module-buttons"></div>
     <div class="sep"></div>
     <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF <span class="pii-eg">lat=52.944 lon=-1.435</span></button>
