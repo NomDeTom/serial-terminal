@@ -26,7 +26,11 @@ export class PiiFilter {
         .replace(/"shortName"\s*:\s*"[^"]*"/g, '"shortName":"[REDACTED]"')
     // GPS key=value pairs (decimal or scaled-integer forms)
         .replace(/\blat(?:itude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, 'lat=[REDACTED]')
-        .replace(/\blon(?:gitude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, 'lon=[REDACTED]');
+        .replace(/\blon(?:gitude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, 'lon=[REDACTED]')
+    // BLE peer device name (e.g. "BLE Connected to Thomas's S10")
+        .replace(/(BLE Connected to ).+/i, '$1[REDACTED]')
+    // Node long name in "owner = " line
+        .replace(/(owner = )[^(]+/, '$1[REDACTED] ');
   }
 
   // Wraps raw PII patterns in ANSI highlight — used in the terminal when PII is OFF
@@ -38,7 +42,9 @@ export class PiiFilter {
         .replace(/"longName"\s*:\s*"[^"]*"/g, `${HI}$&${HI0}`)
         .replace(/"shortName"\s*:\s*"[^"]*"/g, `${HI}$&${HI0}`)
         .replace(/\blat(?:itude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, `${HI}$&${HI0}`)
-        .replace(/\blon(?:gitude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, `${HI}$&${HI0}`);
+        .replace(/\blon(?:gitude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, `${HI}$&${HI0}`)
+        .replace(/(BLE Connected to )(.+)/i, `$1${HI}$2${HI0}`)
+        .replace(/(owner = )([^(]+)/, `$1${HI}$2${HI0}`);
   }
 
   // Wraps [REDACTED]/[NODE-N] placeholders in amber — used when PII is ON.

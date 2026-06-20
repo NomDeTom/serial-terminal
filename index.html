@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -92,7 +92,8 @@
       flex-shrink: 0;
       font-size: 11px;
     }
-    .port-bar-label { color: var(--muted); font-weight: 600; letter-spacing: 0.05em; margin-right: 2px; }
+    .port-bar-label { color: var(--muted); font-weight: 600; letter-spacing: 0.05em; margin-right: 2px; flex-shrink: 0; }
+    #port_chips { display: flex; align-items: center; gap: 6px; flex: 1; overflow-x: auto; }
     .port-chip {
       display: flex;
       align-items: center;
@@ -102,15 +103,143 @@
       background: var(--surface2);
       color: var(--muted);
       font-size: 11px;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
     .port-chip::before { content: '●'; font-size: 7px; }
     .port-chip.port-connected { color: var(--green); }
     .port-chip.port-connected::before { color: var(--green); }
-    .port-chip.port-gone { opacity: 0.45; text-decoration: line-through; }
-    .port-chip.port-gone::before { color: #dc2626; }
+    .port-gone-count {
+      color: var(--muted);
+      font-size: 10px;
+      opacity: 0.55;
+      padding: 2px 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      cursor: default;
+    }
 
-    /* ── Terminal ── */
-    #terminal { flex: 1; min-height: 0; }
+    /* ── Workspace: terminal + info sidebar ── */
+    .workspace {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* Terminal wrapper — size is stable; info panel is a sibling, not a flex child */
+    .term-wrap {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      position: relative;
+    }
+    #terminal { width: 100%; height: 100%; }
+
+    /* Drop overlay */
+    .drop-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(17, 24, 39, 0.88);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s;
+    }
+    .drop-overlay.active { opacity: 1; pointer-events: auto; }
+    .drop-hint {
+      border: 2px dashed var(--green);
+      border-radius: 8px;
+      padding: 24px 44px;
+      color: var(--green);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    /* ── Info sidebar ── */
+    #info_panel {
+      width: 340px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+      min-height: 0;
+    }
+    #info_panel[hidden] { display: none; }
+
+    .info-header {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .info-tab {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 3px 9px;
+      border-radius: 3px;
+      transition: all 0.12s;
+      white-space: nowrap;
+    }
+    .info-tab.active { background: var(--green-bg); color: var(--green); }
+    .info-tab:not(.active):hover { color: var(--text); }
+    .info-tab-dot {
+      display: inline-block;
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-left: 3px;
+      vertical-align: middle;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .info-tab-dot.visible { opacity: 1; }
+    .all-boots-label {
+      margin-left: auto;
+      color: var(--muted);
+      font-weight: 400;
+      font-size: 10px;
+      letter-spacing: 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .all-boots-label:hover { color: var(--text); }
+    .all-boots-label input { cursor: pointer; accent-color: var(--green); }
+    #info_close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 2px 4px;
+      margin-left: 4px;
+      border-radius: 3px;
+    }
+    #info_close:hover { color: var(--text); }
+
+    .info-body {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+    .info-pane { padding: 10px 12px; }
+    .info-pane[hidden] { display: none; }
 
     /* ── Common controls ── */
     label { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 4px; }
@@ -191,33 +320,7 @@
     #polyfill_switcher:hover { color: var(--text); }
     .pii-eg { font-size: 10px; color: var(--muted); font-weight: 400; }
 
-    /* ── Summary panel ── */
-    .summary-panel {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 8px 12px;
-      flex-shrink: 0;
-    }
-    .summary-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--green);
-      letter-spacing: 0.06em;
-    }
-    .summary-header button {
-      margin-left: auto;
-      background: none;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 11px;
-      padding: 0;
-    }
-    .summary-header button:hover { color: var(--text); }
+    /* ── Summary content (inside info sidebar) ── */
     [data-tooltip] { position: relative; cursor: help; }
     [data-tooltip]::after {
       content: attr(data-tooltip);
@@ -236,48 +339,50 @@
       opacity: 0;
       transition: opacity 0.15s;
       z-index: 100;
-      max-width: 360px;
+      max-width: 280px;
       white-space: normal;
       line-height: 1.5;
     }
     [data-tooltip]:hover::after { opacity: 1; }
     #summaryContent {
       display: flex;
-      align-items: flex-start;
-      gap: 14px;
+      flex-direction: column;
+      gap: 0;
     }
     .device-img {
-      width: 72px;
-      height: 72px;
+      width: 64px;
+      height: 64px;
       object-fit: contain;
-      flex-shrink: 0;
+      margin: 4px auto 10px;
+      display: block;
       filter: drop-shadow(0 0 6px rgba(103,234,148,0.2));
       opacity: 0.9;
     }
     .sum-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      gap: 2px 24px;
-      flex: 1;
-      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
     }
     .sum-row {
       display: flex;
       gap: 8px;
-      font-size: 12px;
-      line-height: 1.6;
+      font-size: 11px;
+      line-height: 1.65;
       min-width: 0;
+      padding: 1px 0;
     }
     .sum-label {
       color: var(--muted);
       flex-shrink: 0;
-      width: 80px;
+      width: 76px;
       text-align: right;
+      font-size: 10px;
+      padding-top: 1px;
     }
-    .sum-value { color: var(--text); }
+    .sum-value { color: var(--text); min-width: 0; word-break: break-word; }
     .sum-value code {
       font-family: monospace;
-      font-size: 11px;
+      font-size: 10px;
       background: var(--surface2);
       padding: 1px 4px;
       border-radius: 3px;
@@ -294,47 +399,20 @@
     .sum-warn { color: #f59e0b; font-weight: 600; }
     .sum-err  { color: #ef4444; font-weight: 600; }
     .sum-divider {
-      grid-column: 1 / -1;
       font-size: 10px;
       font-weight: 700;
       color: var(--muted);
       letter-spacing: 0.08em;
-      margin-top: 5px;
-      padding-top: 5px;
+      margin-top: 8px;
+      padding-top: 6px;
       border-top: 1px solid var(--border);
     }
     .sum-divider-err { color: #f87171; border-color: rgba(239,68,68,0.3); }
 
-    /* ── Hop chart panel ── */
-    .hop-chart-panel {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 8px 12px;
-      flex-shrink: 0;
-    }
-    .hop-chart-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--green);
-      letter-spacing: 0.06em;
-    }
-    .hop-chart-header button {
-      margin-left: auto;
-      background: none;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 11px;
-      padding: 0;
-    }
-    .hop-chart-header button:hover { color: var(--text); }
+    /* ── Hop chart content ── */
     #hopChartContent {
       display: flex;
-      gap: 24px;
+      gap: 16px;
       align-items: flex-start;
       flex-wrap: wrap;
     }
@@ -445,26 +523,38 @@
     </div>
   </div>
 
-  <!-- ── Device summary (auto-shown when info extracted) ── -->
-  <div class="summary-panel" hidden>
-    <div class="summary-header">
-      ⓘ DEVICE SUMMARY
-      <button id="summary_hide" title="Hide">✕</button>
-    </div>
-    <div id="summaryContent"></div>
-  </div>
+  <!-- ── Workspace: terminal + info sidebar (side by side, terminal never resizes vertically) ── -->
+  <div class="workspace">
 
-  <!-- ── Hop scaling charts (auto-shown when hop data extracted) ── -->
-  <div class="hop-chart-panel" id="hopChartPanel" hidden>
-    <div class="hop-chart-header">
-      ◈ HOP SCALING
-      <button id="hop_chart_hide" title="Hide">✕</button>
+    <!-- Terminal with drop zone -->
+    <div class="term-wrap" id="term_wrap">
+      <div class="drop-overlay" id="drop_overlay">
+        <div class="drop-hint">Drop log file to analyze</div>
+      </div>
+      <div id="terminal"></div>
     </div>
-    <div id="hopChartContent"></div>
-  </div>
 
-  <!-- ── Terminal ── -->
-  <div id="terminal"></div>
+    <!-- Info sidebar: shown once summary/hop data is extracted -->
+    <div id="info_panel" hidden>
+      <div class="info-header">
+        <button class="info-tab active" data-panel="summary">SUMMARY</button>
+        <button class="info-tab" data-panel="hops">HOPS <span class="info-tab-dot" id="hops_dot"></span></button>
+        <label class="all-boots-label" title="Show accumulated counts across all boots in this log">
+          <input id="all_boots" type="checkbox"> all boots
+        </label>
+        <button id="info_close" title="Close panel">✕</button>
+      </div>
+      <div class="info-body">
+        <div id="panel_summary" class="info-pane">
+          <div id="summaryContent"></div>
+        </div>
+        <div id="panel_hops" class="info-pane" hidden>
+          <div id="hopChartContent"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
 
   <script type="module" src="/src/index.ts"></script>
 </body>

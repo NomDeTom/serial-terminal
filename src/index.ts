@@ -10,7 +10,10 @@ import '@xterm/xterm/css/xterm.css';
 import {serial as polyfill, SerialPort as SerialPortPolyfill} from 'web-serial-polyfill';
 import {PiiFilter} from './piiFilter';
 import {parseLine, colorize, preprocessLine} from './logParser';
-import {DeviceSummary, emptySummary, updateSummary, renderSummary, renderHopChart} from './logSummary';
+import {
+  DeviceSummary, emptySummary, updateSummary, updateSummaryCumulative,
+  renderSummary, renderHopChart,
+} from './logSummary';
 import {initDeviceInfo} from './deviceInfo';
 
 declare class PortOption extends HTMLOptionElement {
@@ -21,16 +24,23 @@ const MAX_HISTORY = 10_000;
 const bufferSize = 8 * 1024;
 
 const piiFilter = new PiiFilter();
-const lineHistory: string[] = [];   // clean (ANSI-stripped, PII-filtered) lines
+const lineHistory: string[] = [];
 const levelFilter = new Set(['D', 'I', 'W', 'E', 'C']);
-const seenModules = new Set<string>();    // modules discovered so far
-const hiddenModules = new Set<string>(); // modules toggled off (empty = all visible)
-let lineBuffer = '';                     // accumulates a partial line between chunks
+const seenModules = new Set<string>();
+const hiddenModules = new Set<string>();
+let lineBuffer = '';
 let summary: DeviceSummary = emptySummary();
+let cumulativeSummary: DeviceSummary = emptySummary();
+let showAllBoots = false;
 let summaryEl: HTMLElement;
 let hopChartEl: HTMLElement;
 let moduleBtnsEl: HTMLElement;
 let portChipsEl: HTMLElement | undefined;
+let infoPanelEl: HTMLElement;
+let hopsDotEl: HTMLElement;
+let panelSummaryEl: HTMLElement;
+let panelHopsEl: HTMLElement;
+let infoPanelVisible = false;
 
 interface PortRecord { label: string; status: 'available' | 'gone'; }
 const portHistory = new Map<SerialPort | SerialPortPolyfill, PortRecord>();
@@ -110,11 +120,38 @@ function renderLine(clean: string): string {
   return piiFilter.annotate(colorize(clean));
 }
 
+// ── Info panel management ─────────────────────────────────────────────────────
+
+function showInfoPanel(): void {
+  if (!infoPanelEl || infoPanelVisible) return;
+  infoPanelEl.hidden = false;
+  infoPanelVisible = true;
+  fitAddon.fit();
+}
+
+function hideInfoPanel(): void {
+  if (!infoPanelEl || !infoPanelVisible) return;
+  infoPanelEl.hidden = true;
+  infoPanelVisible = false;
+  fitAddon.fit();
+}
+
+function switchInfoTab(panel: 'summary' | 'hops'): void {
+  panelSummaryEl.hidden = panel !== 'summary';
+  panelHopsEl.hidden = panel !== 'hops';
+  document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset['panel'] === panel);
+  });
+}
+
+// ── Data pipeline ─────────────────────────────────────────────────────────────
+
 function addLine(raw: string): void {
-  const clean = preprocessLine(raw);   // strip ANSI + systemd prefix; stored unfiltered
+  const clean = preprocessLine(raw);
   if (lineHistory.length >= MAX_HISTORY) lineHistory.shift();
   lineHistory.push(clean);
   updateSummary(clean, summary);
+  updateSummaryCumulative(clean, cumulativeSummary);
   refreshSummary();
   refreshHopChart();
   const key = moduleKey(parseLine(clean).module);
@@ -129,19 +166,22 @@ function addLine(raw: string): void {
 
 function refreshSummary(): void {
   if (!summaryEl) return;
-  const html = renderSummary(summary);
+  const src = showAllBoots ? cumulativeSummary : summary;
+  const html = renderSummary(src);
   if (html) {
     summaryEl.innerHTML = html;
-    summaryEl.closest<HTMLElement>('.summary-panel')!.hidden = false;
+    showInfoPanel();
   }
 }
 
 function refreshHopChart(): void {
   if (!hopChartEl) return;
-  const html = renderHopChart(summary);
+  const src = showAllBoots ? cumulativeSummary : summary;
+  const html = renderHopChart(src);
   if (html) {
     hopChartEl.innerHTML = html;
-    hopChartEl.closest<HTMLElement>('.hop-chart-panel')!.hidden = false;
+    hopsDotEl?.classList.add('visible');
+    showInfoPanel();
   }
 }
 
@@ -163,6 +203,43 @@ function processChunk(chunk: Uint8Array): void {
   }
 }
 
+// ── File drag-and-drop ────────────────────────────────────────────────────────
+
+async function loadFile(file: File): Promise<void> {
+  const text = await file.text();
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    if (line) addLine(line);
+  }
+}
+
+function initDragDrop(): void {
+  const overlay = document.getElementById('drop_overlay')!;
+  let dragDepth = 0;
+
+  document.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragDepth++;
+    overlay.classList.add('active');
+  });
+  document.addEventListener('dragleave', () => {
+    if (--dragDepth <= 0) {
+      dragDepth = 0;
+      overlay.classList.remove('active');
+    }
+  });
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    overlay.classList.remove('active');
+    const file = e.dataTransfer?.files[0];
+    if (file) loadFile(file);
+  });
+}
+
+// ── Port management ────────────────────────────────────────────────────────────
+
 function findPortOption(p: SerialPort | SerialPortPolyfill): PortOption | null {
   for (let i = 0; i < portSelector.options.length; ++i) {
     const option = portSelector.options[i];
@@ -177,14 +254,35 @@ function updatePortBar(): void {
   const el = portChipsEl;
   if (!el) return;
   el.innerHTML = '';
-  portHistory.forEach((record, p) => {
-    const chip = document.createElement('span');
+
+  const entries = Array.from(portHistory.entries());
+  entries.sort(([pa, ra], [pb, rb]) => {
+    const rank = (p: SerialPort | SerialPortPolyfill, r: PortRecord): number =>
+      p === port ? 0 : r.status === 'available' ? 1 : 2;
+    return rank(pa, ra) - rank(pb, rb);
+  });
+
+  const goneLabels: string[] = [];
+  for (const [p, record] of entries) {
     const isConnected = p === port;
-    const state = isConnected ? 'port-connected' : record.status === 'gone' ? 'port-gone' : 'port-available';
-    chip.className = `port-chip ${state}`;
+    if (!isConnected && record.status === 'gone') {
+      goneLabels.push(record.label);
+      continue;
+    }
+    const chip = document.createElement('span');
+    chip.className = `port-chip ${isConnected ? 'port-connected' : 'port-available'}`;
     chip.textContent = record.label;
     el.appendChild(chip);
-  });
+  }
+
+  if (goneLabels.length > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'port-gone-count';
+    badge.textContent = `+${goneLabels.length} gone`;
+    badge.title = goneLabels.join(', ');
+    el.appendChild(badge);
+  }
+
   document.getElementById('port_bar')!.hidden = portHistory.size === 0;
 }
 
@@ -221,18 +319,16 @@ function clearLog(): void {
   lineBuffer = '';
   piiFilter.reset();
   summary = emptySummary();
+  cumulativeSummary = emptySummary();
   seenModules.clear();
   hiddenModules.clear();
   term.clear();
   if (moduleBtnsEl) moduleBtnsEl.innerHTML = '';
-  if (summaryEl) {
-    summaryEl.innerHTML = '';
-    summaryEl.closest<HTMLElement>('.summary-panel')!.hidden = true;
-  }
-  if (hopChartEl) {
-    hopChartEl.innerHTML = '';
-    hopChartEl.closest<HTMLElement>('.hop-chart-panel')!.hidden = true;
-  }
+  if (summaryEl) summaryEl.innerHTML = '';
+  if (hopChartEl) hopChartEl.innerHTML = '';
+  if (hopsDotEl) hopsDotEl.classList.remove('visible');
+  hideInfoPanel();
+  switchInfoTab('summary');
 }
 
 function getSelectedBaudRate(): number {
@@ -287,7 +383,7 @@ async function connectToPort(): Promise<void> {
   connectButton.disabled = true;
   setConnectedUi(true);
   updatePortBar();
-  connectButton.disabled = true; // keep disabled until open succeeds
+  connectButton.disabled = true;
 
   try {
     await port.open(options);
@@ -356,8 +452,11 @@ async function disconnectFromPort(): Promise<void> {
   markDisconnected();
 }
 
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', async () => {
-  initDeviceInfo(); // fire-and-forget; ready well before any log arrives
+  initDeviceInfo();
+
   const terminalElement = document.getElementById('terminal')!;
   term.open(terminalElement);
   fitAddon.fit();
@@ -369,6 +468,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   summaryEl = document.getElementById('summaryContent')!;
   hopChartEl = document.getElementById('hopChartContent')!;
+  infoPanelEl = document.getElementById('info_panel')!;
+  panelSummaryEl = document.getElementById('panel_summary')!;
+  panelHopsEl = document.getElementById('panel_hops')!;
+  hopsDotEl = document.getElementById('hops_dot')!;
   moduleBtnsEl = document.getElementById('module_buttons')!;
   portChipsEl = document.getElementById('port_chips')!;
   statusDot = document.getElementById('statusDot')!;
@@ -398,6 +501,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     advancedPanel.hidden = !advancedPanel.hidden;
     (e.currentTarget as HTMLButtonElement).textContent =
       advancedPanel.hidden ? 'Advanced ▾' : 'Advanced ▴';
+    fitAddon.fit();
+  });
+
+  // Info panel tabs
+  document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      switchInfoTab(btn.dataset['panel'] as 'summary' | 'hops');
+    });
+  });
+
+  // Info panel close
+  document.getElementById('info_close')!.addEventListener('click', () => {
+    hideInfoPanel();
+  });
+
+  // All-boots checkbox
+  const allBootsCb = document.getElementById('all_boots') as HTMLInputElement;
+  allBootsCb.addEventListener('change', () => {
+    showAllBoots = allBootsCb.checked;
+    refreshSummary();
+    refreshHopChart();
   });
 
   // Module all/none toggle
@@ -432,7 +556,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-
   // PII toggle
   const piiButton = document.getElementById('pii_toggle') as HTMLButtonElement;
   function updatePiiButton(): void {
@@ -452,12 +575,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('save')!.addEventListener('click', saveLog);
   document.getElementById('clear')!.addEventListener('click', clearLog);
-  document.getElementById('summary_hide')!.addEventListener('click', () => {
-    summaryEl.closest<HTMLElement>('.summary-panel')!.hidden = true;
-  });
-  document.getElementById('hop_chart_hide')!.addEventListener('click', () => {
-    hopChartEl.closest<HTMLElement>('.hop-chart-panel')!.hidden = true;
-  });
 
   // Polyfill switcher
   const polyfillSwitcher = document.getElementById('polyfill_switcher') as HTMLAnchorElement;
@@ -468,6 +585,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     polyfillSwitcher.href = './?polyfill';
     polyfillSwitcher.textContent = '→ Polyfill';
   }
+
+  initDragDrop();
 
   const serial = usePolyfill ? polyfill : navigator.serial;
   const ports = await serial.getPorts();
