@@ -529,6 +529,26 @@
       height: 8px;
       border-radius: 2px;
     }
+
+    /* ── Footer ── */
+    footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--muted);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      gap: 4px;
+      z-index: 10;
+    }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--text); }
   </style>
 </head>
 <body>
@@ -669,6 +689,13 @@
     </div>
 
   </div>
+
+  <footer>
+    Based on the <a href="https://github.com/meshtastic/firmware" target="_blank" rel="noopener">Meshtastic</a>
+    source code &amp; <a href="https://github.com/GoogleChromeLabs/serial-terminal" target="_blank"
+    rel="noopener">GoogleChromeLabs/serial-terminal</a>. Shared under the
+    <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL-3.0 licence</a>.
+  </footer>
 
   <script type="module" src="/src/index.ts"></script>
 </body>

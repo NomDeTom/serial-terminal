@@ -1,36 +1,36 @@
-# Serial Terminal
+# Meshtastic Log Analyser
 
-This repository contains a Progressive Web App that allows the user to
-communicate with a locally connected serial device through an interactive
-terminal. This provides a demonstration of the [Serial
-API](https://wicg.github.io/serial/).
+A Progressive Web App for reading, analysing, and debugging [Meshtastic](https://meshtastic.org) device logs — either live over a serial connection or by dropping in a saved log file.
 
-This API is available starting with Chrome 89, Edge 89, and Opera 76.
+## Features
+
+- **Live serial connection** — connect to a Meshtastic device over USB serial and stream logs in real time
+- **Log file analysis** — drag and drop a saved log file to run it through the full analysis pipeline
+- **Device summary sidebar** — extracts hardware model, firmware version, radio configuration, GPS, battery, memory, NodeDB, BLE, MQTT, and event counters from the log stream
+- **Hop scaling charts** — visualises per-hop node counts and the scaled-seen-per-hour histogram
+- **Lines of interest** — annotated log lines with gutter markers and hover tooltips explaining what each event means
+- **Level and module filtering** — filter by log level (DBG/INF/WRN/ERR/CRT) and by module tag
+- **PII redaction** — masks node IDs, GPS coordinates, node names, and BLE peer names
+- **Save log** — download the current session as a plain-text file
+
+## Browser support
+
+Requires the [Web Serial API](https://wicg.github.io/serial/): Chrome 89+, Edge 89+, Opera 76+. Firefox and Safari are not supported for live serial; log file analysis works in any modern browser.
 
 ## Privacy
 
-This application is served statically and is cached for offline use. No
-analytics are collected. All communication with the serial device happens
-locally.
+Served statically and cached for offline use. No analytics are collected. All serial communication and log processing happens locally in the browser.
 
 ## Building
 
-This project is written in TypeScript and uses npm and Vite to manage
-dependencies and automate the build process. To get started clone the
-repository and install dependencies by running,
+Requires Node.js and npm.
 
 ```sh
 npm install
+npm run build   # production build → dist/
+npm run dev     # local dev server
 ```
 
-To create a production build in the `dist` folder run,
+## Licence
 
-```sh
-npm run build
-```
-
-To start a local development server run,
-
-```sh
-npm run dev
-```
+GPL-3.0. Based on [GoogleChromeLabs/serial-terminal](https://github.com/GoogleChromeLabs/serial-terminal) (Apache-2.0) and incorporates patterns and knowledge from the [Meshtastic](https://github.com/meshtastic/firmware) source code. Both upstream projects are compatible with GPL-3.0.
