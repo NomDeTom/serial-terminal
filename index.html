@@ -44,6 +44,24 @@
     .sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; flex-shrink: 0; }
     .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
+    /* View tabs (Live Serial / File) + control groups */
+    .ctrl-group { display: flex; align-items: center; gap: 8px; }
+    .ctrl-group[hidden] { display: none; }
+    .view-tab {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 5px;
+      transition: all 0.12s;
+      white-space: nowrap;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+
     /* Status dot */
     #statusDot {
       width: 9px; height: 9px; border-radius: 50%;
@@ -127,6 +145,7 @@
       flex: 1;
       min-height: 0;
       overflow: hidden;
+      position: relative;
     }
 
     /* Terminal wrapper — size is stable; info panel is a sibling, not a flex child */
@@ -136,7 +155,81 @@
       min-height: 0;
       position: relative;
     }
-    #terminal { width: 100%; height: 100%; }
+    .term-wrap[hidden] { display: none; }
+    #terminal_serial, #terminal_file { width: 100%; height: 100%; }
+
+    /* ── Log gutter annotations ── */
+    .log-gutter {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      line-height: 1;
+      cursor: help;
+      pointer-events: auto;
+      user-select: none;
+      z-index: 20;
+    }
+    .gutter-fault { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.7)); }
+    .line-tip {
+      position: fixed;
+      max-width: 320px;
+      background: #1f2937;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 11px;
+      line-height: 1.5;
+      padding: 5px 9px;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.12s;
+      z-index: 1000;
+    }
+    .line-tip.visible { opacity: 1; }
+    .line-flash {
+      background: rgba(103, 234, 148, 0.18);
+      animation: flashfade 1.2s ease-out;
+      pointer-events: none;
+    }
+    @keyframes flashfade { 0% { background: rgba(103, 234, 148, 0.35); } 100% { background: rgba(103, 234, 148, 0); } }
+
+    /* ── Lines of Interest tab ── */
+    #interestContent { display: flex; flex-direction: column; gap: 0; }
+    .int-empty { color: var(--muted); font-size: 11px; padding: 4px 0; }
+    .int-row {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      border-left: 2px solid transparent;
+    }
+    .int-row:hover { background: var(--surface2); border-left-color: var(--green); }
+    .int-title { font-size: 11px; font-weight: 600; color: var(--text); }
+    .int-snip {
+      font-family: monospace;
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .int-hidden {
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0 4px;
+      margin-left: 4px;
+    }
+    .int-pulse { animation: intpulse 1.2s ease-out; }
+    @keyframes intpulse {
+      0% { background: var(--green-bg); }
+      100% { background: transparent; }
+    }
 
     /* Drop overlay */
     .drop-overlay {
@@ -446,27 +539,37 @@
     <span class="title">Meshtastic</span>
     <span class="title-sub">Log Analyser</span>
     <div class="sep"></div>
-    <label for="ports">Port</label>
-    <select id="ports">
-      <option value="prompt">— select port —</option>
-    </select>
-    <button id="connect" class="btn">Connect</button>
+    <button class="view-tab active" data-view="serial">● Live Serial</button>
+    <button class="view-tab" data-view="file">📄 File</button>
     <div class="sep"></div>
-    <label for="baudrate">Baud</label>
-    <select id="baudrate">
-      <option value="9600">9600</option>
-      <option value="19200">19200</option>
-      <option value="38400">38400</option>
-      <option value="57600">57600</option>
-      <option value="115200" selected>115200</option>
-      <option value="230400">230400</option>
-      <option value="460800">460800</option>
-      <option value="921600">921600</option>
-      <option value="custom">Custom…</option>
-    </select>
-    <input id="custom_baudrate" type="number" min="1" placeholder="baud…" hidden style="width:90px">
-    <div class="toolbar-right">
+    <span id="serial_controls" class="ctrl-group">
+      <label for="ports">Port</label>
+      <select id="ports">
+        <option value="prompt">— select port —</option>
+      </select>
+      <button id="connect" class="btn">Connect</button>
+      <div class="sep"></div>
+      <label for="baudrate">Baud</label>
+      <select id="baudrate">
+        <option value="9600">9600</option>
+        <option value="19200">19200</option>
+        <option value="38400">38400</option>
+        <option value="57600">57600</option>
+        <option value="115200" selected>115200</option>
+        <option value="230400">230400</option>
+        <option value="460800">460800</option>
+        <option value="921600">921600</option>
+        <option value="custom">Custom…</option>
+      </select>
+      <input id="custom_baudrate" type="number" min="1" placeholder="baud…" hidden style="width:90px">
       <button id="advanced_toggle" class="btn" style="font-size:11px">Advanced ▾</button>
+    </span>
+    <span id="file_controls" class="ctrl-group" hidden>
+      <button id="load_file_btn" class="btn">📂 Load file…</button>
+      <span id="file_name" class="title-sub"></span>
+      <input id="file_input" type="file" hidden>
+    </span>
+    <div class="toolbar-right">
       <a id="polyfill_switcher"></a>
     </div>
   </div>
@@ -526,18 +629,26 @@
   <!-- ── Workspace: terminal + info sidebar (side by side, terminal never resizes vertically) ── -->
   <div class="workspace">
 
-    <!-- Terminal with drop zone -->
-    <div class="term-wrap" id="term_wrap">
-      <div class="drop-overlay" id="drop_overlay">
-        <div class="drop-hint">Drop log file to analyze</div>
-      </div>
-      <div id="terminal"></div>
+    <!-- Drop zone overlays the whole workspace -->
+    <div class="drop-overlay" id="drop_overlay">
+      <div class="drop-hint">Drop log file to analyze</div>
+    </div>
+
+    <!-- Live serial terminal -->
+    <div class="term-wrap" id="view_serial">
+      <div id="terminal_serial"></div>
+    </div>
+
+    <!-- File analysis terminal (own session, no serial controls) -->
+    <div class="term-wrap" id="view_file" hidden>
+      <div id="terminal_file"></div>
     </div>
 
     <!-- Info sidebar: shown once summary/hop data is extracted -->
     <div id="info_panel" hidden>
       <div class="info-header">
         <button class="info-tab active" data-panel="summary">SUMMARY</button>
+        <button class="info-tab" data-panel="interest">INTEREST <span class="info-tab-dot" id="interest_dot"></span></button>
         <button class="info-tab" data-panel="hops">HOPS <span class="info-tab-dot" id="hops_dot"></span></button>
         <label class="all-boots-label" title="Show accumulated counts across all boots in this log">
           <input id="all_boots" type="checkbox"> all boots
@@ -547,6 +658,9 @@
       <div class="info-body">
         <div id="panel_summary" class="info-pane">
           <div id="summaryContent"></div>
+        </div>
+        <div id="panel_interest" class="info-pane" hidden>
+          <div id="interestContent"></div>
         </div>
         <div id="panel_hops" class="info-pane" hidden>
           <div id="hopChartContent"></div>
