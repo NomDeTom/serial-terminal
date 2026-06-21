@@ -1,4 +1,5 @@
 import {lookupDevice, lookupDeviceByModel} from './deviceInfo';
+import {lookupReleaseDate} from './firmwareReleases';
 
 // Routing.Error enum from meshtastic/protobufs mesh.proto
 const NAK_ERROR_NAMES: Record<number, string> = {
@@ -175,6 +176,13 @@ export interface DeviceSummary {
   telemetryRateLimited: number;
   securityWarning?: boolean;
   rtcMissing?: boolean;
+
+  // Persistence / lifecycle faults
+  fsOrphan?: boolean;              // LittleFS "Found orphan" — filesystem inconsistency
+  pkiKeysRegenerated?: boolean;    // "Generate new PKI keys" — node identity/keys reset
+  factoryReset?: boolean;          // "Perform factory reset!"
+  invalidLoraConfig?: boolean;     // invalid coding_rate/spread_factor or preset invalid for region
+  missingCriticalPrefs: string[];  // persistence-critical prefs that failed to load
 }
 
 export function emptySummary(): DeviceSummary {
@@ -188,6 +196,7 @@ export function emptySummary(): DeviceSummary {
     protoEncodeErrors: 0, radioRxErrors: 0, txRegionUnsetBlocked: 0,
     reliableSendFailures: 0, preHopDropMissingHopStart: 0, tophoneQueueFull: 0,
     invalidChannelIndexErrors: 0, telemetryRateLimited: 0, nodeDbFullEvictions: 0,
+    missingCriticalPrefs: [],
   };
 }
 
@@ -746,6 +755,42 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (/RTC not found/.test(line)) s.rtcMissing = true;
   },
 
+  // ── Persistence / lifecycle faults ────────────────────────────────────────
+
+  // LittleFS inconsistency: "lfs debug:2510: Found orphan 21 20"
+  (line, s) => {
+    if (/lfs .*Found orphan/i.test(line)) s.fsOrphan = true;
+  },
+
+  // "Generate new PKI keys" — node identity/keys regenerated
+  (line, s) => {
+    if (/Generate new PKI keys/.test(line)) s.pkiKeysRegenerated = true;
+  },
+
+  // "Perform factory reset!" / "Initiate full factory reset"
+  (line, s) => {
+    if (/Perform factory reset|Initiate full factory reset/.test(line)) s.factoryReset = true;
+  },
+
+  // Invalid LoRa config from client: "Invalid coding_rate 0", "Invalid spread_factor 0",
+  // "Preset NarrowSlow invalid for UNSET", "Invalid LoRa config received from client"
+  (line, s) => {
+    if (/Invalid coding_rate|Invalid spread_factor|Preset \w+ invalid for|Invalid LoRa config received/
+        .test(line)) {
+      s.invalidLoraConfig = true;
+    }
+  },
+
+  // Persistence-critical prefs failed to load: "Could not open / read /prefs/config.proto".
+  // Only config/nodes are persistence-critical; uiconfig/ringtone/cannedConf are optional.
+  (line, s) => {
+    const m = line.match(/Could not open \/ read \/prefs\/(config|nodes)\.proto/);
+    if (m) {
+      const f = `${m[1]}.proto`;
+      if (!s.missingCriticalPrefs.includes(f)) s.missingCriticalPrefs.push(f);
+    }
+  },
+
   // SSL certificate errors
   (line, s) => {
     const sslRe = /SSL Certificate File can.t be loaded|Error reading File.*\.pem/;
@@ -881,7 +926,9 @@ export function renderSummary(s: DeviceSummary): string {
     s.tophoneQueueFull > 0 || s.invalidChannelIndexErrors > 0 ||
     s.telemetryRateLimited > 0 || s.nodeDbFullEvictions > 0 ||
     s.nodeDbDiscardedOldVersion || s.configVersionMismatch ||
-    s.codingRateOverride || s.packetCounterCorrupted
+    s.codingRateOverride || s.packetCounterCorrupted ||
+    s.fsOrphan || s.pkiKeysRegenerated || s.factoryReset ||
+    s.invalidLoraConfig || s.missingCriticalPrefs.length > 0
   );
   if (!s.hardware && !s.firmware && !s.radioType && !hasEvents) return '';
 
@@ -912,6 +959,8 @@ export function renderSummary(s: DeviceSummary): string {
     if (vl.includes('alpha')) cp.push('alpha pre-release');
     else if (vl.includes('beta')) cp.push('beta pre-release');
     else if (vl.includes('rc')) cp.push('release candidate');
+    const releaseDate = lookupReleaseDate(s.firmware);
+    if (releaseDate) cp.push(`released ${releaseDate}`);
     if (s.buildDate) cp.push(`compiled ${s.buildDate}`);
     rows.push(['Firmware', `${s.firmware}${build}${date}`, cp.join(' · ') || undefined]);
   }
@@ -1234,6 +1283,35 @@ export function renderSummary(s: DeviceSummary): string {
   if (s.radioProbeFailures.length && !s.radioType) {
     evtRows.push(['Radio probe', `failed: ${s.radioProbeFailures.join(', ')}`,
       'Radio chip detection failed — check hardware connections and solder joints']);
+  }
+  if (s.fsOrphan) {
+    evtRows.push(['Filesystem',
+      '<span class="sum-err">LittleFS orphan — flash left inconsistent by interrupted write</span>',
+      'LittleFS found an orphaned block: a write was interrupted by a reboot. Settings may fail ' +
+      'to persist across reboots — a full erase + reflash is recommended.']);
+  }
+  if (s.missingCriticalPrefs.length) {
+    evtRows.push(['Prefs missing',
+      `<span class="sum-warn">${s.missingCriticalPrefs.join(', ')} not loaded — defaults installed</span>`,
+      'Persistence-critical prefs could not be read and defaults were installed. Normal on a fresh ' +
+      'device, but on a configured device it means saved settings are not surviving reboots.']);
+  }
+  if (s.factoryReset) {
+    evtRows.push(['Factory reset',
+      '<span class="sum-err">device performed a full factory reset</span>',
+      'A factory-reset command wiped all prefs — node identity and settings are regenerated.']);
+  }
+  if (s.pkiKeysRegenerated) {
+    evtRows.push(['PKI keys',
+      '<span class="sum-warn">new key pair generated — node identity changed</span>',
+      'The device generated new PKI keys, changing its public key and identity to peers. Unexpected ' +
+      'mid-session, this points to security config not persisting.']);
+  }
+  if (s.invalidLoraConfig) {
+    evtRows.push(['LoRa config',
+      '<span class="sum-warn">invalid values received — corrected by firmware</span>',
+      'The client sent an invalid LoRa config (e.g. coding_rate/spread_factor 0, or a preset ' +
+      'incompatible with the region); the firmware substituted corrected values.']);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────

@@ -3,13 +3,14 @@
  * Based on GoogleChromeLabs/serial-terminal (Apache-2.0)
  */
 
-import {Terminal} from '@xterm/xterm';
+import {Terminal, IDecoration, IMarker} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
 import {WebLinksAddon} from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import {serial as polyfill, SerialPort as SerialPortPolyfill} from 'web-serial-polyfill';
 import {PiiFilter} from './piiFilter';
 import {parseLine, colorize, preprocessLine} from './logParser';
+import {annotateLine, Annotation} from './annotations';
 import {
   DeviceSummary, emptySummary, updateSummary, updateSummaryCumulative,
   renderSummary, renderHopChart,
@@ -23,24 +24,58 @@ declare class PortOption extends HTMLOptionElement {
 const MAX_HISTORY = 10_000;
 const bufferSize = 8 * 1024;
 
-const piiFilter = new PiiFilter();
-const lineHistory: string[] = [];
-const levelFilter = new Set(['D', 'I', 'W', 'E', 'C']);
-const seenModules = new Set<string>();
-const hiddenModules = new Set<string>();
-let lineBuffer = '';
-let summary: DeviceSummary = emptySummary();
-let cumulativeSummary: DeviceSummary = emptySummary();
-let showAllBoots = false;
+interface InterestEntry {
+  seq: number;              // stable id for DOM lookup
+  ann: Annotation;
+  snippet: string;          // ANSI-stripped line text
+  marker?: IMarker;         // present only while the line is rendered (passes filters)
+}
+
+// All per-session state: each of the Live Serial and File views owns one.
+interface Session {
+  kind: 'serial' | 'file';
+  term: Terminal;
+  fit: FitAddon;
+  container: HTMLElement;    // the .term-wrap toggled on view switch
+  pii: PiiFilter;
+  lineHistory: string[];
+  lineBuffer: string;
+  summary: DeviceSummary;
+  cumulative: DeviceSummary;
+  showAllBoots: boolean;
+  levelFilter: Set<string>;
+  seenModules: Set<string>;
+  hiddenModules: Set<string>;
+  interest: InterestEntry[];
+  interestBySeq: Map<number, InterestEntry>;
+  interestSeq: number;
+  decorations: IDecoration[];
+  decoMarkers: IMarker[];
+}
+
+let serialSession: Session;
+let fileSession: Session;
+let active: Session;
+
+let lineTip: HTMLElement | undefined;
+
+// Shared chrome (renders from the active session)
 let summaryEl: HTMLElement;
 let hopChartEl: HTMLElement;
+let interestEl: HTMLElement;
 let moduleBtnsEl: HTMLElement;
 let portChipsEl: HTMLElement | undefined;
 let infoPanelEl: HTMLElement;
 let hopsDotEl: HTMLElement;
+let interestDotEl: HTMLElement;
 let panelSummaryEl: HTMLElement;
 let panelHopsEl: HTMLElement;
+let panelInterestEl: HTMLElement;
 let infoPanelVisible = false;
+
+let allBootsCb: HTMLInputElement;
+let piiButton: HTMLButtonElement;
+let fileNameEl: HTMLElement;
 
 interface PortRecord { label: string; status: 'available' | 'gone'; }
 const portHistory = new Map<SerialPort | SerialPortPolyfill, PortRecord>();
@@ -65,59 +100,208 @@ let reader: ReadableStreamDefaultReader | ReadableStreamBYOBReader | undefined;
 const urlParams = new URLSearchParams(window.location.search);
 const usePolyfill = urlParams.has('polyfill');
 
-const term = new Terminal({
-  scrollback: MAX_HISTORY,
-  theme: {
-    background: '#111827',
-    foreground: '#f3f4f6',
-    cursor: '#67EA94',
-    cursorAccent: '#111827',
-    selectionBackground: '#374151',
-  },
-  fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", monospace',
-  fontSize: 13,
-  convertEol: true,
-});
-
-const fitAddon = new FitAddon();
-term.loadAddon(fitAddon);
-term.loadAddon(new WebLinksAddon());
+function createSession(kind: 'serial' | 'file', container: HTMLElement, mount: HTMLElement): Session {
+  const term = new Terminal({
+    allowProposedApi: true,
+    scrollback: MAX_HISTORY,
+    theme: {
+      background: '#111827',
+      foreground: '#f3f4f6',
+      cursor: '#67EA94',
+      cursorAccent: '#111827',
+      selectionBackground: '#374151',
+    },
+    fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", monospace',
+    fontSize: 13,
+    convertEol: true,
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.loadAddon(new WebLinksAddon());
+  term.open(mount);
+  return {
+    kind, term, fit, container, pii: new PiiFilter(),
+    lineHistory: [], lineBuffer: '',
+    summary: emptySummary(), cumulative: emptySummary(), showAllBoots: false,
+    levelFilter: new Set(['D', 'I', 'W', 'E', 'C']),
+    seenModules: new Set(), hiddenModules: new Set(),
+    interest: [], interestBySeq: new Map(), interestSeq: 0,
+    decorations: [], decoMarkers: [],
+  };
+}
 
 function moduleKey(module: string): string {
   return module || '__boot__';
 }
 
-function linePassesFilter(line: string): boolean {
+function linePassesFilter(s: Session, line: string): boolean {
   const {level, module} = parseLine(line);
-  if (level && !levelFilter.has(level)) return false;
-  if (hiddenModules.has(moduleKey(module))) return false;
+  if (level && !s.levelFilter.has(level)) return false;
+  if (s.hiddenModules.has(moduleKey(module))) return false;
   return true;
 }
 
-function addModuleButton(key: string): void {
+function addModuleButton(s: Session, key: string): void {
   const label = key === '__boot__' ? 'boot' : key;
   const btn = document.createElement('button');
-  btn.className = 'module-btn active';
+  btn.className = `module-btn${s.hiddenModules.has(key) ? '' : ' active'}`;
   btn.textContent = label;
   btn.dataset['mod'] = key;
   btn.addEventListener('click', () => {
-    if (hiddenModules.has(key)) {
-      hiddenModules.delete(key);
+    if (s.hiddenModules.has(key)) {
+      s.hiddenModules.delete(key);
       btn.classList.add('active');
     } else {
-      hiddenModules.add(key);
+      s.hiddenModules.add(key);
       btn.classList.remove('active');
     }
-    rerender();
+    rerender(s);
   });
   moduleBtnsEl.appendChild(btn);
 }
 
-function renderLine(clean: string): string {
-  if (piiFilter.enabled) {
-    return piiFilter.highlightPlaceholders(colorize(piiFilter.filter(clean)));
+// Two leading spaces reserve a left gutter that annotation decorations overlay.
+const GUTTER = '  ';
+
+function renderLine(s: Session, clean: string): string {
+  const body = s.pii.enabled ?
+    s.pii.highlightPlaceholders(colorize(s.pii.filter(clean))) :
+    s.pii.annotate(colorize(clean));
+  return GUTTER + body;
+}
+
+// ── Line annotations (gutter markers + hover tooltip) ─────────────────────────
+
+function showLineTip(target: HTMLElement, text: string): void {
+  if (!lineTip) {
+    lineTip = document.createElement('div');
+    lineTip.className = 'line-tip';
+    document.body.appendChild(lineTip);
   }
-  return piiFilter.annotate(colorize(clean));
+  lineTip.textContent = text;
+  const r = target.getBoundingClientRect();
+  lineTip.style.left = `${Math.round(r.right + 6)}px`;
+  lineTip.style.top = `${Math.round(r.top)}px`;
+  lineTip.classList.add('visible');
+}
+
+function hideLineTip(): void {
+  lineTip?.classList.remove('visible');
+}
+
+function decorateGutter(el: HTMLElement, ann: Annotation, entry?: InterestEntry): void {
+  if (el.dataset['wired']) return;
+  el.dataset['wired'] = '1';
+  el.textContent = ann.severity === 'info' ? '💡' : '⚠️';
+  el.classList.add('log-gutter', ann.severity === 'info' ? 'gutter-info' : 'gutter-fault');
+  el.addEventListener('mouseenter', () => showLineTip(el, ann.comment));
+  el.addEventListener('mouseleave', hideLineTip);
+  if (entry) el.addEventListener('click', () => openInterestEntry(entry));
+}
+
+// Writes a line to the session's terminal and attaches a gutter decoration if it
+// is an annotated line. When `entry` is supplied its `marker` is linked so the
+// Interest tab can scroll to the line.
+function writeAndDecorate(s: Session, clean: string, ann?: Annotation, entry?: InterestEntry): void {
+  if (!ann) {
+    s.term.writeln(renderLine(s, clean));
+    return;
+  }
+  s.term.writeln(renderLine(s, clean), () => {
+    const marker = s.term.registerMarker(-1);
+    if (!marker) return;
+    s.decoMarkers.push(marker);
+    if (entry) entry.marker = marker;
+    const deco = s.term.registerDecoration({marker, x: 0, width: 2, layer: 'top'});
+    if (deco) {
+      deco.onRender((el) => decorateGutter(el, ann, entry));
+      s.decorations.push(deco);
+    }
+  });
+}
+
+function disposeDecorations(s: Session): void {
+  for (const d of s.decorations) d.dispose();
+  for (const m of s.decoMarkers) m.dispose();
+  s.decorations.length = 0;
+  s.decoMarkers.length = 0;
+  for (const e of s.interest) e.marker = undefined;
+  hideLineTip();
+}
+
+// ── Lines of Interest tab ─────────────────────────────────────────────────────
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderInterestGroup(title: string, entries: InterestEntry[], fault: boolean): string {
+  const divider = `<div class="sum-divider${fault ? ' sum-divider-err' : ''}">` +
+    `${title} (${entries.length})</div>`;
+  const rows = entries.map((e) => {
+    const hidden = e.marker ? '' : ' <span class="int-hidden">hidden</span>';
+    const snip = escapeHtml(e.snippet.slice(0, 140));
+    const tip = e.ann.comment.replace(/"/g, '&quot;');
+    return `<div class="int-row" data-seq="${e.seq}" data-tooltip="${tip}">` +
+      `<span class="int-title">${escapeHtml(e.ann.title)}${hidden}</span>` +
+      `<span class="int-snip">${snip}</span></div>`;
+  }).join('');
+  return divider + rows;
+}
+
+function refreshInterest(s: Session): void {
+  if (!interestEl || s !== active) return;
+  interestDotEl?.classList.toggle('visible', s.interest.length > 0);
+  if (s.interest.length === 0) {
+    interestEl.innerHTML = '<div class="int-empty">No lines of interest yet.</div>';
+    return;
+  }
+  showInfoPanel();
+  const faults = s.interest.filter((e) => e.ann.severity !== 'info');
+  const infos = s.interest.filter((e) => e.ann.severity === 'info');
+  const parts: string[] = [];
+  if (faults.length) parts.push(renderInterestGroup('⚠ Faults', faults, true));
+  if (infos.length) parts.push(renderInterestGroup('💡 Explained', infos, false));
+  interestEl.innerHTML = parts.join('');
+  interestEl.querySelectorAll<HTMLElement>('.int-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      const e = s.interestBySeq.get(Number(row.dataset['seq']));
+      if (e) revealLine(s, e);
+    });
+  });
+}
+
+// Flash the whole terminal row at a marker briefly, then remove the highlight.
+function flashLine(s: Session, marker: IMarker): void {
+  const deco = s.term.registerDecoration({marker, x: 0, width: s.term.cols});
+  if (!deco) return;
+  deco.onRender((el) => el.classList.add('line-flash'));
+  setTimeout(() => deco.dispose(), 1200);
+}
+
+// Interest row → terminal: scroll to the line (clearing filters first if hidden).
+function revealLine(s: Session, entry: InterestEntry): void {
+  if (!entry.marker) {
+    resetFilters(s);
+    rerender(s);
+  }
+  if (entry.marker) {
+    s.term.scrollToLine(entry.marker.line);
+    flashLine(s, entry.marker);
+  }
+}
+
+// Gutter marker → Interest tab: open the tab and pulse the matching row.
+function openInterestEntry(entry: InterestEntry): void {
+  switchInfoTab('interest');
+  showInfoPanel();
+  const row = interestEl?.querySelector<HTMLElement>(`.int-row[data-seq="${entry.seq}"]`);
+  if (row) {
+    row.scrollIntoView({block: 'nearest'});
+    row.classList.remove('int-pulse');
+    void row.offsetWidth; // restart the animation
+    row.classList.add('int-pulse');
+  }
 }
 
 // ── Info panel management ─────────────────────────────────────────────────────
@@ -126,19 +310,20 @@ function showInfoPanel(): void {
   if (!infoPanelEl || infoPanelVisible) return;
   infoPanelEl.hidden = false;
   infoPanelVisible = true;
-  fitAddon.fit();
+  active.fit.fit();
 }
 
 function hideInfoPanel(): void {
   if (!infoPanelEl || !infoPanelVisible) return;
   infoPanelEl.hidden = true;
   infoPanelVisible = false;
-  fitAddon.fit();
+  active.fit.fit();
 }
 
-function switchInfoTab(panel: 'summary' | 'hops'): void {
+function switchInfoTab(panel: 'summary' | 'hops' | 'interest'): void {
   panelSummaryEl.hidden = panel !== 'summary';
   panelHopsEl.hidden = panel !== 'hops';
+  panelInterestEl.hidden = panel !== 'interest';
   document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset['panel'] === panel);
   });
@@ -146,38 +331,54 @@ function switchInfoTab(panel: 'summary' | 'hops'): void {
 
 // ── Data pipeline ─────────────────────────────────────────────────────────────
 
-function addLine(raw: string): void {
+function addLine(s: Session, raw: string): void {
   const clean = preprocessLine(raw);
-  if (lineHistory.length >= MAX_HISTORY) lineHistory.shift();
-  lineHistory.push(clean);
-  updateSummary(clean, summary);
-  updateSummaryCumulative(clean, cumulativeSummary);
-  refreshSummary();
-  refreshHopChart();
-  const key = moduleKey(parseLine(clean).module);
-  if (!seenModules.has(key)) {
-    seenModules.add(key);
-    addModuleButton(key);
+  if (s.lineHistory.length >= MAX_HISTORY) {
+    const removed = s.lineHistory.shift();
+    // Keep the interest list aligned with the annotated lines still in history.
+    if (removed !== undefined && annotateLine(removed)) {
+      const old = s.interest.shift();
+      if (old) {
+        s.interestBySeq.delete(old.seq);
+        old.marker?.dispose();
+      }
+    }
   }
-  if (linePassesFilter(clean)) {
-    term.writeln(renderLine(clean));
+  s.lineHistory.push(clean);
+  updateSummary(clean, s.summary);
+  updateSummaryCumulative(clean, s.cumulative);
+  refreshSummary(s);
+  refreshHopChart(s);
+  const key = moduleKey(parseLine(clean).module);
+  if (!s.seenModules.has(key)) {
+    s.seenModules.add(key);
+    if (s === active) addModuleButton(s, key);
+  }
+  const ann = annotateLine(clean);
+  let entry: InterestEntry | undefined;
+  if (ann) {
+    entry = {seq: s.interestSeq++, ann, snippet: clean};
+    s.interest.push(entry);
+    s.interestBySeq.set(entry.seq, entry);
+    refreshInterest(s);
+  }
+  if (linePassesFilter(s, clean)) {
+    writeAndDecorate(s, clean, ann, entry);
   }
 }
 
-function refreshSummary(): void {
-  if (!summaryEl) return;
-  const src = showAllBoots ? cumulativeSummary : summary;
-  const html = renderSummary(src);
+function refreshSummary(s: Session): void {
+  if (!summaryEl || s !== active) return;
+  const html = renderSummary(s.showAllBoots ? s.cumulative : s.summary);
   if (html) {
     summaryEl.innerHTML = html;
     showInfoPanel();
   }
 }
 
-function refreshHopChart(): void {
-  if (!hopChartEl) return;
-  const src = showAllBoots ? cumulativeSummary : summary;
-  const html = renderHopChart(src);
+function refreshHopChart(s: Session): void {
+  if (!hopChartEl || s !== active) return;
+  const html = renderHopChart(s.showAllBoots ? s.cumulative : s.summary);
   if (html) {
     hopChartEl.innerHTML = html;
     hopsDotEl?.classList.add('visible');
@@ -185,32 +386,102 @@ function refreshHopChart(): void {
   }
 }
 
-function rerender(): void {
-  term.clear();
-  for (const line of lineHistory) {
-    if (linePassesFilter(line)) {
-      term.writeln(renderLine(line));
+function resetFilters(s: Session): void {
+  for (const lv of ['D', 'I', 'W', 'E', 'C']) s.levelFilter.add(lv);
+  s.hiddenModules.clear();
+  document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => b.classList.add('active'));
+  document.querySelectorAll<HTMLButtonElement>('.module-btn').forEach((b) => b.classList.add('active'));
+}
+
+function rerender(s: Session): void {
+  disposeDecorations(s);
+  s.term.clear();
+  let ip = 0;
+  for (const line of s.lineHistory) {
+    const ann = annotateLine(line);
+    const entry = ann ? s.interest[ip++] : undefined;
+    if (linePassesFilter(s, line)) {
+      writeAndDecorate(s, line, ann, entry);
     }
   }
+  refreshInterest(s);
 }
 
-function processChunk(chunk: Uint8Array): void {
+function processChunk(s: Session, chunk: Uint8Array): void {
   const text = new TextDecoder().decode(chunk);
-  const parts = (lineBuffer + text).split('\n');
-  lineBuffer = parts.pop() ?? '';
+  const parts = (s.lineBuffer + text).split('\n');
+  s.lineBuffer = parts.pop() ?? '';
   for (const line of parts) {
-    addLine(line.replace(/\r$/, ''));
+    addLine(s, line.replace(/\r$/, ''));
   }
 }
 
-// ── File drag-and-drop ────────────────────────────────────────────────────────
+// ── View switching (Live Serial ↔ File) ───────────────────────────────────────
 
-async function loadFile(file: File): Promise<void> {
+function updatePiiButton(): void {
+  const on = active.pii.enabled;
+  const eg = on ?
+    '<span class="pii-eg">lat=[REDACTED] lon=[REDACTED]</span>' :
+    '<span class="pii-eg">lat=52.944 lon=-1.435</span>';
+  piiButton.innerHTML = `🕵️ Hide PII: ${on ? 'ON' : 'OFF'} ${eg}`;
+  piiButton.classList.toggle('btn-active', on);
+}
+
+// Rebuild the shared chrome (panels, filter buttons, module list) from `active`.
+function syncChrome(): void {
+  moduleBtnsEl.innerHTML = '';
+  for (const key of active.seenModules) addModuleButton(active, key);
+
+  document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => {
+    b.classList.toggle('active', active.levelFilter.has(b.dataset['level']!));
+  });
+  allBootsCb.checked = active.showAllBoots;
+  updatePiiButton();
+
+  summaryEl.innerHTML = '';
+  hopChartEl.innerHTML = '';
+  interestEl.innerHTML = '';
+  hopsDotEl.classList.remove('visible');
+  interestDotEl.classList.remove('visible');
+  refreshSummary(active);
+  refreshHopChart(active);
+  refreshInterest(active);
+}
+
+function switchView(kind: 'serial' | 'file'): void {
+  active = kind === 'serial' ? serialSession : fileSession;
+  serialSession.container.hidden = kind !== 'serial';
+  fileSession.container.hidden = kind !== 'file';
+
+  document.getElementById('serial_controls')!.hidden = kind !== 'serial';
+  document.getElementById('file_controls')!.hidden = kind !== 'file';
+  document.getElementById('port_bar')!.hidden = kind !== 'serial' || portHistory.size === 0;
+  statusDot.hidden = kind !== 'serial';
+
+  document.querySelectorAll<HTMLButtonElement>('.view-tab').forEach((b) => {
+    b.classList.toggle('active', b.dataset['view'] === kind);
+  });
+
+  syncChrome();
+  active.fit.fit();
+}
+
+// ── File loading ───────────────────────────────────────────────────────────────
+
+async function loadFileInto(file: File): Promise<void> {
+  switchView('file');
+  clearLog();
+  fileNameEl.textContent = file.name;
   const text = await file.text();
-  const lines = text.split(/\r?\n/);
-  for (const line of lines) {
-    if (line) addLine(line);
+  try {
+    for (const line of text.split(/\r?\n/)) {
+      if (line) addLine(fileSession, line);
+    }
+  } catch (err) {
+    console.error('loadFileInto: error during line processing:', err);
   }
+  active.fit.fit();
+  active.term.scrollToBottom();
 }
 
 function initDragDrop(): void {
@@ -234,7 +505,7 @@ function initDragDrop(): void {
     dragDepth = 0;
     overlay.classList.remove('active');
     const file = e.dataTransfer?.files[0];
-    if (file) loadFile(file);
+    if (file) loadFileInto(file);
   });
 }
 
@@ -283,7 +554,7 @@ function updatePortBar(): void {
     el.appendChild(badge);
   }
 
-  document.getElementById('port_bar')!.hidden = portHistory.size === 0;
+  document.getElementById('port_bar')!.hidden = active.kind !== 'serial' || portHistory.size === 0;
 }
 
 function addNewPort(p: SerialPort | SerialPortPolyfill): PortOption {
@@ -301,10 +572,9 @@ function maybeAddNewPort(p: SerialPort | SerialPortPolyfill): PortOption {
 }
 
 function saveLog(): void {
-  if (lineHistory.length === 0) return;
-  const lines = piiFilter.enabled ?
-    lineHistory.map((l) => piiFilter.filter(l)) :
-    lineHistory;
+  const s = active;
+  if (s.lineHistory.length === 0) return;
+  const lines = s.pii.enabled ? s.lineHistory.map((l) => s.pii.filter(l)) : s.lineHistory;
   const blob = new Blob([lines.join('\n')], {type: 'text/plain'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -315,18 +585,26 @@ function saveLog(): void {
 }
 
 function clearLog(): void {
-  lineHistory.length = 0;
-  lineBuffer = '';
-  piiFilter.reset();
-  summary = emptySummary();
-  cumulativeSummary = emptySummary();
-  seenModules.clear();
-  hiddenModules.clear();
-  term.clear();
-  if (moduleBtnsEl) moduleBtnsEl.innerHTML = '';
-  if (summaryEl) summaryEl.innerHTML = '';
-  if (hopChartEl) hopChartEl.innerHTML = '';
-  if (hopsDotEl) hopsDotEl.classList.remove('visible');
+  const s = active;
+  s.lineHistory.length = 0;
+  s.lineBuffer = '';
+  s.pii.reset();
+  s.summary = emptySummary();
+  s.cumulative = emptySummary();
+  s.seenModules.clear();
+  s.hiddenModules.clear();
+  s.showAllBoots = false;
+  disposeDecorations(s);
+  s.interest.length = 0;
+  s.interestBySeq.clear();
+  s.term.clear();
+  if (s === fileSession) fileNameEl.textContent = '';
+  moduleBtnsEl.innerHTML = '';
+  summaryEl.innerHTML = '';
+  hopChartEl.innerHTML = '';
+  interestEl.innerHTML = '';
+  hopsDotEl.classList.remove('visible');
+  interestDotEl.classList.remove('visible');
   hideInfoPanel();
   switchInfoTab('summary');
 }
@@ -358,6 +636,7 @@ function markDisconnected(): void {
 }
 
 async function connectToPort(): Promise<void> {
+  switchView('serial');
   if (portSelector.value === 'prompt') {
     try {
       const serial = usePolyfill ? polyfill : navigator.serial;
@@ -390,7 +669,7 @@ async function connectToPort(): Promise<void> {
     connectButton.disabled = false;
   } catch (e) {
     if (e instanceof Error) {
-      term.writeln(`\x1b[31m<ERROR: ${e.message}>\x1b[0m`);
+      serialSession.term.writeln(`\x1b[31m<ERROR: ${e.message}>\x1b[0m`);
     }
     markDisconnected();
     return;
@@ -417,12 +696,12 @@ async function connectToPort(): Promise<void> {
           }
         })();
 
-        if (value) processChunk(value);
+        if (value) processChunk(serialSession, value);
         if (done) break;
       }
     } catch (e) {
       if (e instanceof Error) {
-        term.writeln(`\x1b[31m<ERROR: ${e.message}>\x1b[0m`);
+        serialSession.term.writeln(`\x1b[31m<ERROR: ${e.message}>\x1b[0m`);
       }
     } finally {
       reader?.releaseLock();
@@ -457,24 +736,31 @@ async function disconnectFromPort(): Promise<void> {
 document.addEventListener('DOMContentLoaded', async () => {
   initDeviceInfo();
 
-  const terminalElement = document.getElementById('terminal')!;
-  term.open(terminalElement);
-  fitAddon.fit();
-  window.addEventListener('resize', () => fitAddon.fit());
-  window.addEventListener('focus', () => fitAddon.fit());
+  serialSession = createSession('serial',
+      document.getElementById('view_serial')!, document.getElementById('terminal_serial')!);
+  fileSession = createSession('file',
+      document.getElementById('view_file')!, document.getElementById('terminal_file')!);
+  active = serialSession;
+
+  window.addEventListener('resize', () => active.fit.fit());
+  window.addEventListener('focus', () => active.fit.fit());
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) fitAddon.fit();
+    if (!document.hidden) active.fit.fit();
   });
 
   summaryEl = document.getElementById('summaryContent')!;
   hopChartEl = document.getElementById('hopChartContent')!;
+  interestEl = document.getElementById('interestContent')!;
   infoPanelEl = document.getElementById('info_panel')!;
   panelSummaryEl = document.getElementById('panel_summary')!;
   panelHopsEl = document.getElementById('panel_hops')!;
+  panelInterestEl = document.getElementById('panel_interest')!;
   hopsDotEl = document.getElementById('hops_dot')!;
+  interestDotEl = document.getElementById('interest_dot')!;
   moduleBtnsEl = document.getElementById('module_buttons')!;
   portChipsEl = document.getElementById('port_chips')!;
   statusDot = document.getElementById('statusDot')!;
+  fileNameEl = document.getElementById('file_name')!;
   portSelector = document.getElementById('ports') as HTMLSelectElement;
   connectButton = document.getElementById('connect') as HTMLButtonElement;
   baudRateSelector = document.getElementById('baudrate') as HTMLSelectElement;
@@ -485,6 +771,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   flowControlCheckbox = document.getElementById('rtscts') as HTMLInputElement;
   reconnectCheckbox = document.getElementById('reconnect') as HTMLInputElement;
   grabNextCheckbox = document.getElementById('grab_next') as HTMLInputElement;
+  allBootsCb = document.getElementById('all_boots') as HTMLInputElement;
+  piiButton = document.getElementById('pii_toggle') as HTMLButtonElement;
 
   connectButton.addEventListener('click', () => {
     if (port) disconnectFromPort();
@@ -495,19 +783,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     customBaudRateInput.hidden = baudRateSelector.value !== 'custom';
   });
 
+  // View tabs (Live Serial / File)
+  document.querySelectorAll<HTMLButtonElement>('.view-tab').forEach((btn) => {
+    btn.addEventListener('click', () => switchView(btn.dataset['view'] as 'serial' | 'file'));
+  });
+
+  // File load button
+  const fileInput = document.getElementById('file_input') as HTMLInputElement;
+  document.getElementById('load_file_btn')!.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if (f) loadFileInto(f);
+    fileInput.value = '';
+  });
+
   // Advanced panel toggle
   const advancedPanel = document.getElementById('advanced')!;
   document.getElementById('advanced_toggle')!.addEventListener('click', (e) => {
     advancedPanel.hidden = !advancedPanel.hidden;
     (e.currentTarget as HTMLButtonElement).textContent =
       advancedPanel.hidden ? 'Advanced ▾' : 'Advanced ▴';
-    fitAddon.fit();
+    active.fit.fit();
   });
 
   // Info panel tabs
   document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
-      switchInfoTab(btn.dataset['panel'] as 'summary' | 'hops');
+      switchInfoTab(btn.dataset['panel'] as 'summary' | 'hops' | 'interest');
     });
   });
 
@@ -517,60 +819,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // All-boots checkbox
-  const allBootsCb = document.getElementById('all_boots') as HTMLInputElement;
   allBootsCb.addEventListener('change', () => {
-    showAllBoots = allBootsCb.checked;
-    refreshSummary();
-    refreshHopChart();
+    active.showAllBoots = allBootsCb.checked;
+    refreshSummary(active);
+    refreshHopChart(active);
   });
 
   // Module all/none toggle
   document.getElementById('module_all_none')!.addEventListener('click', (e) => {
-    const allHidden = hiddenModules.size === seenModules.size && seenModules.size > 0;
+    const s = active;
+    const allHidden = s.hiddenModules.size === s.seenModules.size && s.seenModules.size > 0;
     moduleBtnsEl.querySelectorAll<HTMLButtonElement>('.module-btn').forEach((btn) => {
       const key = btn.dataset['mod']!;
       if (allHidden) {
-        hiddenModules.delete(key);
+        s.hiddenModules.delete(key);
         btn.classList.add('active');
       } else {
-        hiddenModules.add(key);
+        s.hiddenModules.add(key);
         btn.classList.remove('active');
       }
     });
     (e.currentTarget as HTMLButtonElement).classList.toggle('active', allHidden);
-    rerender();
+    rerender(s);
   });
 
   // Level filter buttons
   document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const level = btn.dataset['level']!;
-      if (levelFilter.has(level)) {
-        levelFilter.delete(level);
+      if (active.levelFilter.has(level)) {
+        active.levelFilter.delete(level);
         btn.classList.remove('active');
       } else {
-        levelFilter.add(level);
+        active.levelFilter.add(level);
         btn.classList.add('active');
       }
-      rerender();
+      rerender(active);
     });
   });
 
   // PII toggle
-  const piiButton = document.getElementById('pii_toggle') as HTMLButtonElement;
-  function updatePiiButton(): void {
-    const on = piiFilter.enabled;
-    const eg = on ?
-      '<span class="pii-eg">lat=[REDACTED] lon=[REDACTED]</span>' :
-      '<span class="pii-eg">lat=52.944 lon=-1.435</span>';
-    piiButton.innerHTML = `🕵️ Hide PII: ${on ? 'ON' : 'OFF'} ${eg}`;
-    piiButton.classList.toggle('btn-active', on);
-  }
   updatePiiButton();
   piiButton.addEventListener('click', () => {
-    piiFilter.enabled = !piiFilter.enabled;
+    active.pii.enabled = !active.pii.enabled;
     updatePiiButton();
-    rerender();
+    rerender(active);
   });
 
   document.getElementById('save')!.addEventListener('click', saveLog);
@@ -587,6 +880,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   initDragDrop();
+  switchView('serial');
 
   const serial = usePolyfill ? polyfill : navigator.serial;
   const ports = await serial.getPorts();
