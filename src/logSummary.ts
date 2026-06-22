@@ -8,6 +8,27 @@ const NAK_ERROR_NAMES: Record<number, string> = {
   8: 'NO_RESPONSE', 9: 'DUTY_CYCLE_LIMIT',
 };
 
+// RadioLib error codes (TypeDef.h) — subset reachable on Meshtastic radio paths
+const RADIOLIB_ERR: Record<number, string> = {
+  [-2]: 'CHIP_NOT_FOUND', [-3]: 'MEMORY_ALLOCATION_FAILED',
+  [-4]: 'PACKET_TOO_LONG', [-5]: 'TX_TIMEOUT', [-6]: 'RX_TIMEOUT',
+  [-7]: 'CRC_MISMATCH', [-8]: 'INVALID_BANDWIDTH', [-9]: 'INVALID_SPREADING_FACTOR',
+  [-10]: 'INVALID_CODING_RATE', [-12]: 'INVALID_FREQUENCY', [-13]: 'INVALID_OUTPUT_POWER',
+  [-16]: 'SPI_WRITE_FAILED', [-18]: 'INVALID_PREAMBLE_LENGTH', [-19]: 'INVALID_GAIN',
+  [-20]: 'WRONG_MODEM', [-703]: 'INVALID_TCXO_VOLTAGE', [-704]: 'INVALID_MODULATION_PARAMETERS',
+  [-705]: 'SPI_CMD_TIMEOUT', [-706]: 'SPI_CMD_INVALID', [-707]: 'SPI_CMD_FAILED',
+  [-1300]: 'FRONTEND_CALIBRATION_FAILED', [-1301]: 'INVALID_SIDE_DETECT',
+};
+
+// CriticalErrorCode from meshtastic/protobufs mesh.proto / mesh.pb.h
+const CRIT_ERR: Record<number, string> = {
+  0: 'NONE', 1: 'TX_WATCHDOG', 2: 'SLEEP_ENTER_WAIT', 3: 'NO_RADIO',
+  4: 'UNSPECIFIED', 5: 'UBLOX_UNIT_FAILED', 6: 'NO_AXP192',
+  7: 'INVALID_RADIO_SETTING', 8: 'TRANSMIT_FAILED', 9: 'BROWNOUT',
+  10: 'SX1262_FAILURE', 11: 'RADIO_SPI_BUG',
+  12: 'FLASH_CORRUPTION_RECOVERABLE', 13: 'FLASH_CORRUPTION_UNRECOVERABLE',
+};
+
 export interface DeviceSummary {
   // Device identity
   hardware?: string;
@@ -40,6 +61,9 @@ export interface DeviceSummary {
   slotTimeMs?: number;
   preambleTimeMs?: number;
   codingRateOverride?: boolean; // default CR higher than custom setting
+  radioOscMode?: string;        // 'TCXO' / 'XTAL' / 'XTAL (fallback)'
+  tcxoInitFailed?: boolean;     // TCXO failed init, fell back to XTAL
+  tcxoFallbackToXtal?: boolean; // LR11x0/LR20x0 confirmed init success in XTAL mode
 
   // GPS hardware
   gps?: string;
@@ -48,6 +72,39 @@ export interface DeviceSummary {
   localLon?: number;
   localAlt?: number;           // mm above sea level
   gpsSiv?: number;             // satellites in view
+
+  // GPS lock acquisition / fault tracking
+  gpsLockTimeSecs?: number;
+  gpsLocksAcquired: number;
+  gpsSearchFailures: number;
+  gpsConsecutiveLockFailures?: number;  // rising = chip can't fix; resets to 0 on lock
+  gpsNoLockPublishFailures: number;
+  gpsChecksumFailDelta?: number;
+  gpsChecksumFailTotal?: number;
+  gpsBufferFullEvents: number;
+  gpsBufferFullBytes?: number;
+  gpsFrameErrors: number;
+  gpsFrameErrorBaud?: string;
+  gpsStaleDataEvents: number;
+  gpsStaleAgeLoc?: number;
+  gpsStaleAgeTime?: number;
+  gpsStaleAgeDate?: number;
+  gpsBogusValueRejects: number;
+  gpsConfigNacks: number;
+  gpsNackedMessages: string[];
+  gpsConfigTimeouts: number;
+  gpsTimedOutMessages: string[];
+  gpsAtgmConfigFailures: number;
+  gpsConfigSaveFailed?: boolean;
+  gpsDefaultsMaintained?: boolean;
+  gpsProbeCacheStale?: boolean;
+  gpsStaleProbe?: string;
+  gpsConstellations?: string;
+  gpsPowerState?: string;
+  gpsPowerStateTransitions: number;
+  gpsUserMode?: string;
+  rtcDriftCorrections: number;
+  lastClockDriftSecs?: number;
 
   // I²C
   i2cDevices: string[];
@@ -182,7 +239,138 @@ export interface DeviceSummary {
   pkiKeysRegenerated?: boolean;    // "Generate new PKI keys" — node identity/keys reset
   factoryReset?: boolean;          // "Perform factory reset!"
   invalidLoraConfig?: boolean;     // invalid coding_rate/spread_factor or preset invalid for region
-  missingCriticalPrefs: string[];  // persistence-critical prefs that failed to load
+  missingCriticalPrefs: string[];  // persistence-critical prefs (config / nodes) that failed
+  missingPrefs: string[];          // non-critical prefs (uiconfig, cannedConf, ringtone…)
+
+  // Crash / panic
+  taskWatchdogTriggered?: boolean; // ESP-IDF task_wdt fired
+  watchdogTask?: string;           // starved task name (from "task_wdt:  - NAME (CPU N)")
+  espPanicBacktrace?: boolean;     // "Backtrace:" line seen
+  panicPc?: string;                // first PC from panic backtrace
+  radioAssertFailed?: boolean;
+  assertLocations: string[];       // "file:line" deduped list
+  criticalErrors: Array<{code: number; file: string; line: number}>;
+
+  // Radio driver health (source-derived)
+  radioInitRetries: number;
+  radioInitError?: string;
+  radioStartReceiveErrors: number;
+  lastStartReceiveError?: string;
+  radioLibErrors: Array<{radio: string; op: string; code: number}>;
+  radioBusyTxHardwareFailure?: boolean;
+  startTransmitFailures: number;
+  lastStartTransmitError?: string;
+  missedTxDone: number;
+  missedRxDone: number;
+  rxInterruptWrongMode: number;
+  radioRecoveryReboot?: boolean;
+  loraErrorRecoveries: number;
+  unsupported24GhzReverted?: boolean;
+  rxSensitivityPatchFailed?: boolean;
+
+  // WarmStore / NodeDB corruption
+  warmstoreRingCorrupt?: boolean;
+  warmstoreBadPages?: number;
+  deviceStateDiscarded?: boolean;
+
+  // Queue / mesh link health
+  busyTxCount: number;
+  fromRadioQOverflow: number;
+  retransmissions: number;
+  naksReceived: number;
+  agcCalibFailures: number;
+  gpsNotDetected?: boolean;
+  packetHistoryCorrupt?: boolean;
+
+  // PKI / security (extended)
+  pkiUnknownKeyDmRefused: number;
+  pkiClientKeyMismatch?: boolean;
+
+  // Encrypted storage (fix-saveconfig branch)
+  queuePushFailures: number;
+  safeFileWriteFailures: number;
+  encryptedStorageLockedSkips: number;
+  storageLocked?: boolean;
+  encryptionFailures: number;
+  storageDecryptCorrupt?: boolean;
+  unsafePowerSaveBlocked: number;
+  filesystemMountFailed?: boolean;
+
+  // Power / sleep
+  adcErrors: number;
+  powerChipFailures: string[];
+  espSleepErrors: number;
+  lockdownState?: string;
+  lockdownActive?: boolean;
+
+  // Informational / low-priority
+  resetReasonCode?: string;
+  configCoerced?: boolean;
+  meshDbPurged?: number;
+  scheduledReboot?: boolean;
+  scheduledRebootSecs?: number;
+  enteredDfuMode?: boolean;
+  regionPresetSwap?: {preset: string; from: string; to: string};
+  tmFlags?: Record<string, string>;
+  lastNextHopDest?: string;
+  lastNextHop?: number;
+
+  // CRIT-level log catch-all
+  critLogCount: number;
+  lastCritLog?: string;
+
+  // ── Sensor readings (local — Part A #161–#171) ────────────────────────────
+  envPressure?: number;
+  envCurrent?: number;
+  envGasResistance?: number;
+  envHumidity?: number;
+  envTemperature?: number;
+  pm10?: number; pm25?: number; pm100?: number;
+  co2?: number; co2Temp?: number; co2Humidity?: number;
+  hcho?: number; hchoTemp?: number; hchoHumidity?: number;
+  iaqVoltage?: number; iaq?: number; distance?: number; lux?: number;
+  soilTemp?: number; soilMoisture?: number;
+  healthTemp?: number; heartBpm?: number; spo2?: number;
+  radiation?: number;
+  windSpeed?: number; windDir?: number; weight?: number;
+  ch1V?: number; ch1I?: number; ch2V?: number; ch2I?: number;
+  hostUptime?: number; hostDiskFree?: number; hostMemFree?: number; hostLoad?: number[];
+
+  // Peer telemetry (Part B #172–#176)
+  peerTelemetry: Record<string, Record<string, number>>;
+  peerTelemetryCount: number;
+
+  // Telemetry decode failures (Part C #177–#178)
+  telemetryDecodeErrors: Record<string, number>;
+
+  // I2C sensor driver health (Part D #179–#187)
+  sensorErrors: Array<{sensor: string; op: string; code?: number}>;
+  sensorsNotFound: string[];
+  sensorsDropped: string[];
+  sensorReadFailures: number;
+  sensorChecksumFailures: number;
+  sensorFrameErrors: number;
+  sensorClockConflict: string[];
+  sensorCalibSaveFailed?: boolean;
+  bme680LibCode?: {sensor: string; lib: string; code: number};
+
+  // Feature module diagnostics (Part E #188–#201)
+  adminConfigSaveFailed?: boolean;
+  configSaveFailures: number;
+  adminDroppedStorageLocked: number;
+  adminNoSessionKey: number;
+  invalidSerialConfig?: boolean;
+  unsignedNodeInfoDropped: number;
+  nodeKeyDowngrade: string[];
+  nodeInfoLicensedMismatch?: boolean;
+  keyVerificationFailures: number;
+  storeForwardPsramFull?: boolean;
+  neighborDbFull: number;
+  tracerouteHopLimitExceeded: number;
+  tracerouteErrors: number;
+  positionZeroSkipped: number;
+  detectionMisconfigured?: boolean;
+  femLnaUnsupported?: boolean;
 }
 
 export function emptySummary(): DeviceSummary {
@@ -196,7 +384,30 @@ export function emptySummary(): DeviceSummary {
     protoEncodeErrors: 0, radioRxErrors: 0, txRegionUnsetBlocked: 0,
     reliableSendFailures: 0, preHopDropMissingHopStart: 0, tophoneQueueFull: 0,
     invalidChannelIndexErrors: 0, telemetryRateLimited: 0, nodeDbFullEvictions: 0,
-    missingCriticalPrefs: [],
+    missingCriticalPrefs: [], missingPrefs: [],
+    assertLocations: [], criticalErrors: [], radioLibErrors: [], powerChipFailures: [],
+    radioInitRetries: 0, radioStartReceiveErrors: 0,
+    startTransmitFailures: 0, missedTxDone: 0, missedRxDone: 0,
+    rxInterruptWrongMode: 0, loraErrorRecoveries: 0,
+    busyTxCount: 0, fromRadioQOverflow: 0, retransmissions: 0,
+    naksReceived: 0, agcCalibFailures: 0, pkiUnknownKeyDmRefused: 0,
+    queuePushFailures: 0, safeFileWriteFailures: 0, encryptedStorageLockedSkips: 0,
+    encryptionFailures: 0, unsafePowerSaveBlocked: 0,
+    adcErrors: 0, espSleepErrors: 0, critLogCount: 0,
+    gpsLocksAcquired: 0, gpsSearchFailures: 0, gpsNoLockPublishFailures: 0,
+    gpsBufferFullEvents: 0, gpsFrameErrors: 0, gpsStaleDataEvents: 0,
+    gpsBogusValueRejects: 0, gpsConfigNacks: 0, gpsNackedMessages: [],
+    gpsConfigTimeouts: 0, gpsTimedOutMessages: [], gpsAtgmConfigFailures: 0,
+    gpsPowerStateTransitions: 0, rtcDriftCorrections: 0,
+    peerTelemetry: {}, peerTelemetryCount: 0, telemetryDecodeErrors: {},
+    sensorErrors: [], sensorsNotFound: [], sensorsDropped: [],
+    sensorReadFailures: 0, sensorChecksumFailures: 0, sensorFrameErrors: 0,
+    sensorClockConflict: [],
+    configSaveFailures: 0,
+    adminDroppedStorageLocked: 0, adminNoSessionKey: 0,
+    unsignedNodeInfoDropped: 0, nodeKeyDowngrade: [],
+    keyVerificationFailures: 0, neighborDbFull: 0,
+    tracerouteHopLimitExceeded: 0, tracerouteErrors: 0, positionZeroSkipped: 0,
   };
 }
 
@@ -879,6 +1090,783 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
       s.lastMessage = m2[1].trim(); s.lastMessageFrom = m2[2];
     }
   },
+
+  // ── Crash / fault detection (#94–#102) ────────────────────────────────────
+
+  // ESP-IDF task watchdog: trigger line + follow-up naming the starved task
+  (line, s) => {
+    if (/task_wdt: Task watchdog got triggered/.test(line)) {
+      s.taskWatchdogTriggered = true;
+      return;
+    }
+    const m = line.match(/task_wdt:\s+-\s+(\S+) \(CPU \d+\)/);
+    if (m) s.watchdogTask = s.watchdogTask ?? m[1];
+  },
+
+  // ESP32 panic backtrace
+  (line, s) => {
+    const m = line.match(/^Backtrace:\s+(0x[0-9a-fA-F]+)/);
+    if (m) {
+      s.espPanicBacktrace = true;
+      s.panicPc = s.panicPc ?? m[1];
+    }
+  },
+
+  // "[RadioIf] assert failed src/mesh/X.cpp:N"
+  (line, s) => {
+    const m = line.match(/\[RadioIf\] assert failed (src\/\S+):\s*(\d+)/);
+    if (!m) return;
+    s.radioAssertFailed = true;
+    const loc = `${m[1]}:${m[2]}`;
+    if (!s.assertLocations.includes(loc)) s.assertLocations.push(loc);
+  },
+
+  // "[Router] NOTE! Record critical error N at FILE:N"
+  (line, s) => {
+    const m = line.match(/Record critical error (\d+) at (\S+):(\d+)/);
+    if (!m) return;
+    const entry = {code: Number(m[1]), file: m[2], line: Number(m[3])};
+    const key = `${entry.code}:${entry.file}:${entry.line}`;
+    if (!s.criticalErrors.some((e) => `${e.code}:${e.file}:${e.line}` === key)) {
+      s.criticalErrors.push(entry);
+    }
+  },
+
+  // "X init failed with -N (CODE), retrying" / "X init failed with TCXO Vref N V (err -N), retrying"
+  (line, s) => {
+    const m = line.match(
+        /(\w+) init failed with (?:TCXO Vref [\d.]+ V \(err (-?\d+)\)|(-?\d+)).*retry/i
+    );
+    if (!m) return;
+    s.radioInitRetries++;
+    s.radioInitError = m[2] ?? m[3]; // group2 = TCXO branch; group3 = numeric-code branch
+    if (m[2] !== undefined) s.tcxoInitFailed = true;
+  },
+
+  // "[RadioIf] StartReceive error: -N"
+  (line, s) => {
+    const m = line.match(/\[RadioIf\] StartReceive error:\s*(-?\d+)/);
+    if (!m) return;
+    s.radioStartReceiveErrors++;
+    s.lastStartReceiveError = m[1];
+  },
+
+  // "WarmStore: ring unreadable (N bad page(s)), empty"
+  (line, s) => {
+    const m = line.match(/WarmStore: ring unreadable \((\d+) bad page/);
+    if (!m) return;
+    s.warmstoreRingCorrupt = true;
+    s.warmstoreBadPages = Number(m[1]);
+  },
+
+  // "Devicestate N is old or invalid, discard"
+  (line, s) => {
+    if (/Devicestate \d+ is old or invalid, discard/.test(line)) s.deviceStateDiscarded = true;
+  },
+
+  // Non-critical prefs missing (extension of #82 — catches uiconfig, cannedConf, ringtone, …)
+  (line, s) => {
+    const m = line.match(/Could not open \/ read \/prefs\/(\w+)\.proto/);
+    if (!m) return;
+    if (['config', 'nodes'].includes(m[1])) return; // handled by #82
+    const f = `${m[1]}.proto`;
+    if (!s.missingPrefs.includes(f)) s.missingPrefs.push(f);
+  },
+
+  // ── Queue / mesh link health (#103–#110) ──────────────────────────────────
+
+  // "[RadioIf] Can not send yet, busyTx"
+  (line, s) => {
+    if (/Can not send yet, busyTx/.test(line)) s.busyTxCount++;
+  },
+
+  // "caught missed TX_DONE"
+  (line, s) => {
+    if (/caught missed TX_DONE/.test(line)) s.missedTxDone++;
+  },
+
+  // GPS not detected / given up
+  (line, s) => {
+    if (/No GNSS Module|GPS not detected; marked not present|Give up on GPS probe/.test(line)) {
+      s.gpsNotDetected = true;
+    }
+  },
+
+  // "Packet History - Invalid size -N, using default N"
+  (line, s) => {
+    if (/Packet History - Invalid size/.test(line)) s.packetHistoryCorrupt = true;
+  },
+
+  // "[Router] Sending retransmission …, tries left=N"
+  (line, s) => {
+    if (/Sending retransmission .*tries left=/.test(line)) s.retransmissions++;
+  },
+
+  // "[Router] Received a NAK for 0xN, stopping retransmissions"
+  (line, s) => {
+    if (/Received a NAK for 0x[\da-fA-F]+, stopping/.test(line)) s.naksReceived++;
+  },
+
+  // "[Router] fromRadioQ full, drop oldest!"
+  (line, s) => {
+    if (/fromRadioQ full, drop oldest/.test(line)) s.fromRadioQOverflow++;
+  },
+
+  // "AGC reset: calibration did not complete within Nms" — radio calibration failure
+  (line, s) => {
+    if (/AGC reset: calibration did not complete within \d+ms/.test(line)) s.agcCalibFailures++;
+  },
+
+  // ── Security / PKI (#111–#112) ────────────────────────────────────────────
+
+  // "Unknown public key for destination node 0xN (portnum N), refusing to send legacy DM"
+  (line, s) => {
+    if (/Unknown public key for destination node.*refusing to send legacy DM/.test(line)) {
+      s.pkiUnknownKeyDmRefused++;
+    }
+  },
+
+  // "Client public key differs from requested: 0xN, stored key begins 0xN"
+  (line, s) => {
+    if (/Client public key differs from requested/.test(line)) s.pkiClientKeyMismatch = true;
+  },
+
+  // ── Low priority / informational (#113–#120) ──────────────────────────────
+
+  // "Reset reason: 0xN" (NRF52 hex reset reason code)
+  (line, s) => {
+    const m = line.match(/Reset reason: (0x[\da-fA-F]+)/);
+    if (m) s.resetReasonCode = m[1];
+  },
+
+  // "Coerce (telemetry|position) … to role-aware minimum on defaults"
+  (line, s) => {
+    if (/Coerce (?:telemetry|position).* to role-aware minimum/.test(line)) s.configCoerced = true;
+  },
+
+  // "cleanupMeshDB purged N entries"
+  (line, s) => {
+    const m = line.match(/cleanupMeshDB purged (\d+) entries/);
+    if (m) s.meshDbPurged = Number(m[1]);
+  },
+
+  // "[Router] Reboot in N seconds"
+  (line, s) => {
+    const m = line.match(/Reboot in (\d+) seconds/);
+    if (!m) return;
+    s.scheduledReboot = true;
+    s.scheduledRebootSecs = Number(m[1]);
+  },
+
+  // "rebooting device into DFU mode"
+  (line, s) => {
+    if (/rebooting device into DFU mode/i.test(line)) s.enteredDfuMode = true;
+  },
+
+  // "Preset X (implies region swap|swaps region) Y to Z"
+  (line, s) => {
+    const m = line.match(/Preset (\w+) (?:implies region swap|swaps region) (\w+) to (\w+)/);
+    if (m) s.regionPresetSwap = {preset: m[1], from: m[2], to: m[3]};
+  },
+
+  // "[TM] Enabled: pos_dedup=N nodeinfo_resp=N …"
+  (line, s) => {
+    const m = line.match(/\[TM\] Enabled: (.+)/);
+    if (!m) return;
+    s.tmFlags = {};
+    for (const part of m[1].trim().split(/\s+/)) {
+      const eq = part.indexOf('=');
+      if (eq >= 0) s.tmFlags[part.slice(0, eq)] = part.slice(eq + 1);
+    }
+  },
+
+  // "Setting next hop for packet with dest XXXX to N"
+  (line, s) => {
+    const m = line.match(/Setting next hop for packet with dest (\w+) to (\d+)/);
+    if (!m) return;
+    s.lastNextHopDest = m[1];
+    s.lastNextHop = Number(m[2]);
+  },
+
+  // ── Source-derived: RadioLib driver surface (#121–#128) ───────────────────
+
+  // Generic RadioLib op failure: "SX1262 startReceive RadioLib err=-707"
+  (line, s) => {
+    const m = line.match(
+        /(SX126[0-9xX]+|LR11x0|LR2021|RF95|STM32WL|LLCC68) (\w+) RadioLib err=(-?\d+)/
+    );
+    if (!m) return;
+    const entry = {radio: m[1], op: m[2], code: Number(m[3])};
+    const key = `${entry.radio}:${entry.op}:${entry.code}`;
+    if (!s.radioLibErrors.some((e) => `${e.radio}:${e.op}:${e.code}` === key)) {
+      s.radioLibErrors.push(entry);
+    }
+  },
+
+  // "Hardware Failure! busyTx for more than 60s" — radio wedged in TX
+  (line, s) => {
+    if (/Hardware Failure! busyTx for more than 60s/.test(line)) {
+      s.radioBusyTxHardwareFailure = true;
+    }
+  },
+
+  // "startTransmit failed, error=N"
+  (line, s) => {
+    const m = line.match(/startTransmit failed, error=(-?\d+)/);
+    if (!m) return;
+    s.startTransmitFailures++;
+    s.lastStartTransmitError = m[1];
+  },
+
+  // "caught missed RX_DONE"
+  (line, s) => {
+    if (/caught missed RX_DONE/.test(line)) s.missedRxDone++;
+  },
+
+  // "handleReceiveInterrupt called when not in rx mode" — ISR / state desync
+  (line, s) => {
+    if (/handleReceiveInterrupt called when not in rx mode/.test(line)) s.rxInterruptWrongMode++;
+  },
+
+  // "Reconfigure failed, rebooting" / "LoRa in error detected, attempting to recover"
+  (line, s) => {
+    if (/Reconfigure failed, rebooting/.test(line)) {
+      s.radioRecoveryReboot = true;
+      return;
+    }
+    if (/LoRa in error detected, attempting to recover/.test(line)) s.loraErrorRecoveries++;
+  },
+
+  // "does not support 2.4GHz. Revert to unset"
+  (line, s) => {
+    if (/does not support 2\.4GHz\. Revert to unset/.test(line)) s.unsupported24GhzReverted = true;
+  },
+
+  // "0x8B5 patch" / "0x8B5 RX sensitivity patch" — degraded RX sensitivity
+  (line, s) => {
+    if (/0x8B5 (?:patch|RX sensitivity patch)/.test(line)) s.rxSensitivityPatchFailed = true;
+  },
+
+  // ── Storage / queue failure (#129–#135) ───────────────────────────────────
+
+  // CRIT-level queue-push failures (toPhone / MQTT / notification queues)
+  (line, s) => {
+    if (/Failed to (?:add a message to mqttQueue|queue a (?:packet|notification) into \w+)/
+        .test(line)) {
+      s.queuePushFailures++;
+    }
+  },
+
+  // SafeFile atomic-write integrity failure
+  (line, s) => {
+    if (/Readback failed hash mismatch|Can.t open tmp file for readback|can.t rename new pref file/
+        .test(line)) {
+      s.safeFileWriteFailures++;
+    }
+  },
+
+  // Encrypted storage locked — save skipped (narrow to actual save-skip lines; the boot-time
+  // "Encrypted storage locked, using default config" INFO line is excluded intentionally)
+  (line, s) => {
+    if (/saveToDisk.*encrypted storage locked|Config save skipped.*encrypted storage is locked/i
+        .test(line)) {
+      s.encryptedStorageLockedSkips++;
+      s.storageLocked = true;
+    }
+  },
+
+  // Encryption failures
+  (line, s) => {
+    if (/Failed to encrypt and write|OOM (?:encoding|decrypting)/.test(line)) {
+      s.encryptionFailures++;
+    }
+  },
+
+  // Storage decrypt / decode failed — treating as corrupt
+  (line, s) => {
+    if (/Decrypt failed for .*treating as corrupt|decrypt\/decode failed during reload/
+        .test(line)) {
+      s.storageDecryptCorrupt = true;
+    }
+  },
+
+  // Save blocked due to unsafe power level (low battery)
+  (line, s) => {
+    if (/trying to save\w+\(\) on unsafe device power level/.test(line)) {
+      s.unsafePowerSaveBlocked++;
+    }
+  },
+
+  // Filesystem mount failed / not implemented
+  (line, s) => {
+    if (/Filesystem mount failed|Filesystem not implemented/.test(line)) {
+      s.filesystemMountFailed = true;
+    }
+  },
+
+  // ── Power / sleep / lockdown (#136–#139) ──────────────────────────────────
+
+  // ADC init / calibration failures — unreliable battery readings
+  (line, s) => {
+    if (/ADC (?:oneshot (?:init|handle)|channel config|calibration).*(?:fail|not initialized)/i
+        .test(line)) {
+      s.adcErrors++;
+    }
+  },
+
+  // Power management chip failures
+  (line, s) => {
+    const m = line.match(/(BQ27220|BQ25896) init failed|No (AXP\d+) power management/);
+    if (!m) return;
+    const chip = m[1] ?? m[2];
+    if (!s.powerChipFailures.includes(chip)) s.powerChipFailures.push(chip);
+  },
+
+  // ESP sleep API errors (non-zero return)
+  (line, s) => {
+    const m = line.match(/esp_(?:light_sleep_start|sleep_enable_\w+) result (-?\d+)/);
+    if (m && Number(m[1]) !== 0) s.espSleepErrors++;
+  },
+
+  // Lockdown state: "Lockdown: Device locked" / "session limit reached … locking and rebooting"
+  (line, s) => {
+    const m = line.match(/Lockdown: (.+)/);
+    if (!m) return;
+    s.lockdownState = m[1].trim();
+    s.lockdownActive = true;
+  },
+
+  // ── CRIT log catch-all (#140) ─────────────────────────────────────────────
+  // Every CRIT-level line is currently invisible (existing #23 only catches ERROR).
+  (line, s) => {
+    if (!/^CRIT\s+\|/.test(line)) return;
+    s.critLogCount++;
+    if (!s.lastCritLog) s.lastCritLog = line.slice(0, 120).trim();
+  },
+
+  // ── TCXO / oscillator (#141) ──────────────────────────────────────────────
+  // "LR11x0/LR20x0/SX… init success without TCXO (XTAL mode)"
+  (line, s) => {
+    const m = line.match(/(LR11x0|LR20x0|SX\w+) init success without TCXO \(XTAL mode\)/);
+    if (!m) return;
+    s.tcxoFallbackToXtal = true;
+    s.radioOscMode = 'XTAL (fallback)';
+  },
+
+  // ── GPS lock acquisition (#142–#144) ──────────────────────────────────────
+  // "[GPS] Took Ns to get lock"
+  (line, s) => {
+    const m = line.match(/\[GPS\] Took (\d+)s to get lock/);
+    if (!m) return;
+    s.gpsLockTimeSecs = Number(m[1]);
+    s.gpsLocksAcquired++;
+  },
+
+  // "[GPS] GPS search ended without fix after Ns (consecutive failures: N)"
+  (line, s) => {
+    const m = line.match(
+        /\[GPS\] GPS search ended without fix after (\d+)s \(consecutive failures: (\d+)\)/
+    );
+    if (!m) return;
+    s.gpsSearchFailures++;
+    s.gpsConsecutiveLockFailures = Number(m[2]);
+  },
+
+  // "didn't get a GPS lock in time"
+  (line, s) => {
+    if (/didn.t get a GPS lock in time/.test(line)) s.gpsNoLockPublishFailures++;
+  },
+
+  // ── GPS serial-link integrity (#145–#149) ─────────────────────────────────
+  // "[GPS] N new GPS checksum failures, for a total of N"
+  (line, s) => {
+    const m = line.match(/\[GPS\] (\d+) new GPS checksum failures, for a total of (\d+)/);
+    if (!m) return;
+    s.gpsChecksumFailDelta = Number(m[1]);
+    s.gpsChecksumFailTotal = Number(m[2]);
+  },
+
+  // "[GPS] GPS Buffer full with N bytes waiting"
+  (line, s) => {
+    const m = line.match(/\[GPS\] GPS Buffer full with (\d+) bytes waiting/);
+    if (!m) return;
+    s.gpsBufferFullEvents++;
+    s.gpsBufferFullBytes = Number(m[1]);
+  },
+
+  // "[GPS] UBlox Frame Errors (baudrate N)"
+  (line, s) => {
+    const m = line.match(/\[GPS\] UBlox Frame Errors \(baudrate (\d+)\)/);
+    if (!m) return;
+    s.gpsFrameErrors++;
+    s.gpsFrameErrorBaud = m[1];
+  },
+
+  // "[GPS] SOME data is TOO OLD: LOC N, TIME N, DATE N"
+  (line, s) => {
+    const m = line.match(/\[GPS\] SOME data is TOO OLD: LOC (\d+), TIME (\d+), DATE (\d+)/);
+    if (!m) return;
+    s.gpsStaleDataEvents++;
+    s.gpsStaleAgeLoc = Number(m[1]);
+    s.gpsStaleAgeTime = Number(m[2]);
+    s.gpsStaleAgeDate = Number(m[3]);
+  },
+
+  // "[GPS] BOGUS hdop/course.value() REJECTED"
+  (line, s) => {
+    if (/\[GPS\] BOGUS (?:hdop|course)\.value\(\) REJECTED/.test(line)) s.gpsBogusValueRejects++;
+  },
+
+  // ── GPS module config failures (#150–#154) ────────────────────────────────
+  // "[GPS] Got NACK/NAK for class XX message XX"
+  (line, s) => {
+    const m = line.match(/\[GPS\] Got NA[CK]K? for class ([0-9A-Fa-f]{2}) message ([0-9A-Fa-f]{2})/);
+    if (!m) return;
+    s.gpsConfigNacks++;
+    const msg = `${m[1]}:${m[2]}`;
+    if (!s.gpsNackedMessages.includes(msg)) s.gpsNackedMessages.push(msg);
+  },
+
+  // "[GPS] No response for class XX message XX"
+  (line, s) => {
+    const m = line.match(/\[GPS\] No response for class ([0-9A-Fa-f]{2}) message ([0-9A-Fa-f]{2})/);
+    if (!m) return;
+    s.gpsConfigTimeouts++;
+    const msg = `${m[1]}:${m[2]}`;
+    if (!s.gpsTimedOutMessages.includes(msg)) s.gpsTimedOutMessages.push(msg);
+  },
+
+  // "[GPS] ATGM336H: Could not …"
+  (line, s) => {
+    if (/\[GPS\] ATGM336H: Could not/.test(line)) s.gpsAtgmConfigFailures++;
+  },
+
+  // "[GPS] Unable to save GNSS module config"
+  (line, s) => {
+    if (/\[GPS\] Unable to save GNSS module config/.test(line)) s.gpsConfigSaveFailed = true;
+  },
+
+  // "reconfigure GNSS - defaults maintained"
+  (line, s) => {
+    if (/reconfigure GNSS - defaults maintained/.test(line)) s.gpsDefaultsMaintained = true;
+  },
+
+  // ── GPS probe / detection (#155–#157) ─────────────────────────────────────
+  // "[GPS] <chip> detected" — negative lookahead avoids "GPS not detected"
+  (line, s) => {
+    const m = line.match(/\[GPS\] (?!GPS not)(\S+) detected/);
+    if (m && !s.gpsChipModel) s.gpsChipModel = m[1];
+  },
+
+  // "[GPS] Cached GPS probe is stale (chip @ baud), clearing cache"
+  (line, s) => {
+    const m = line.match(/\[GPS\] Cached GPS probe is stale \(([^@]+) @ (\d+)\), clearing cache/);
+    if (!m) return;
+    s.gpsProbeCacheStale = true;
+    s.gpsStaleProbe = `${m[1].trim()} @ ${m[2]}`;
+  },
+
+  // "[GPS] GPS+SBAS+GLONASS+Galileo configured" / "[GPS] GPS+SBAS configured"
+  (line, s) => {
+    const m = line.match(/\[GPS\] (GPS\+SBAS(?:\+GLONASS\+Galileo)?) configured/);
+    if (m) s.gpsConstellations = m[1];
+  },
+
+  // ── GPS power / time (#158–#160) ──────────────────────────────────────────
+  // "[GPS] GPS power state move from X to Y"
+  (line, s) => {
+    const m = line.match(/\[GPS\] GPS power state move from (\w+) to (\w+)/);
+    if (!m) return;
+    s.gpsPowerState = `${m[1]}→${m[2]}`;
+    s.gpsPowerStateTransitions++;
+  },
+
+  // "Reapply external time to correct clock drift N secs"
+  (line, s) => {
+    const m = line.match(/Reapply external time to correct clock drift (-?\d+) secs/);
+    if (!m) return;
+    s.rtcDriftCorrections++;
+    s.lastClockDriftSecs = Number(m[1]);
+  },
+
+  // "[GPS] User toggled GpsMode. Now ENABLED/DISABLED"
+  (line, s) => {
+    const m = line.match(/\[GPS\] User toggled GpsMode\. Now (ENABLED|DISABLED)/);
+    if (m) s.gpsUserMode = m[1];
+  },
+
+  // ── Sensor readings — local broadcast (#161–#171) ─────────────────────────
+
+  // #161 Environment: barometric_pressure, current, gas_resistance, humidity, temperature
+  (line, s) => {
+    // eslint-disable-next-line max-len
+    const m = line.match(/Send: barometric_pressure=([\d.-]+), current=([\d.-]+), gas_resistance=([\d.-]+), relative_humidity=([\d.-]+), temperature=([\d.-]+)/);
+    if (!m) return;
+    s.envPressure = Number(m[1]); s.envCurrent = Number(m[2]);
+    s.envGasResistance = Number(m[3]); s.envHumidity = Number(m[4]);
+    s.envTemperature = Number(m[5]);
+  },
+
+  // #162 Air quality: PM10 / PM2.5 / PM100
+  (line, s) => {
+    // eslint-disable-next-line max-len
+    const m = line.match(/Send: pm10_(?:standard|environmental)=(\d+), pm25_(?:standard|environmental)=(\d+), pm100_(?:standard|environmental)=(\d+)/);
+    if (!m) return;
+    s.pm10 = Number(m[1]); s.pm25 = Number(m[2]); s.pm100 = Number(m[3]);
+  },
+
+  // #163 CO₂ sensor
+  (line, s) => {
+    const m = line.match(/Send: co2=(\d+), co2_t=([\d.-]+), co2_rh=([\d.-]+)/);
+    if (!m) return;
+    s.co2 = Number(m[1]); s.co2Temp = Number(m[2]); s.co2Humidity = Number(m[3]);
+  },
+
+  // #164 HCHO / VOC sensor
+  (line, s) => {
+    const m = line.match(/Send: hcho=([\d.-]+), hcho_t=([\d.-]+), hcho_rh=([\d.-]+)/);
+    if (!m) return;
+    s.hcho = Number(m[1]); s.hchoTemp = Number(m[2]); s.hchoHumidity = Number(m[3]);
+  },
+
+  // #165 Light / IAQ
+  (line, s) => {
+    const m = line.match(/Send: voltage=([\d.-]+), IAQ=(\d+), distance=([\d.-]+), lux=([\d.-]+)/);
+    if (!m) return;
+    s.iaqVoltage = Number(m[1]); s.iaq = Number(m[2]);
+    s.distance = Number(m[3]); s.lux = Number(m[4]);
+  },
+
+  // #166 Soil
+  (line, s) => {
+    const m = line.match(/Send: soil_temperature=([\d.-]+), soil_moisture=(\d+)/);
+    if (!m) return;
+    s.soilTemp = Number(m[1]); s.soilMoisture = Number(m[2]);
+  },
+
+  // #167 Health (temperature, heart rate, SpO2)
+  (line, s) => {
+    const m = line.match(/Send: temperature=([\d.-]+), heart_bpm=(\d+), spO2=(\d+)/);
+    if (!m) return;
+    s.healthTemp = Number(m[1]); s.heartBpm = Number(m[2]); s.spo2 = Number(m[3]);
+  },
+
+  // #168 Radiation — µ is multi-byte UTF-8, match ..? instead of the literal
+  (line, s) => {
+    const m = line.match(/Send: radiation=([\d.-]+)..?R\/h/);
+    if (m) s.radiation = Number(m[1]);
+  },
+
+  // #169 Wind / weight
+  (line, s) => {
+    const m = line.match(/Send: wind speed=([\d.-]+)m\/s, direction=(\d+) degrees, weight=([\d.-]+)kg/);
+    if (!m) return;
+    s.windSpeed = Number(m[1]); s.windDir = Number(m[2]); s.weight = Number(m[3]);
+  },
+
+  // #170 Power — INA219/226 dual-channel
+  (line, s) => {
+    const m = line.match(
+        /Send: ch1_voltage=([\d.-]+), ch1_current=([\d.-]+), ch2_voltage=([\d.-]+), ch2_current=([\d.-]+)/
+    );
+    if (!m) return;
+    s.ch1V = Number(m[1]); s.ch1I = Number(m[2]);
+    s.ch2V = Number(m[3]); s.ch2I = Number(m[4]);
+  },
+
+  // #171 Host metrics (Linux / Portduino)
+  (line, s) => {
+    const m = line.match(
+        /Send: uptime=(\d+), diskfree=(\d+), memory free=(\d+), load=([\d.]+), ([\d.]+), ([\d.]+)/
+    );
+    if (!m) return;
+    s.hostUptime = Number(m[1]); s.hostDiskFree = Number(m[2]);
+    s.hostMemFree = Number(m[3]);
+    s.hostLoad = [Number(m[4]), Number(m[5]), Number(m[6])];
+  },
+
+  // ── Peer telemetry (#172–#176, combined) ──────────────────────────────────
+  // "(Received [Host Metrics ]from X): key=val, ..." — generic KV capture.
+  // Capped at 20 unique senders to avoid unbounded growth.
+  (line, s) => {
+    const m = line.match(/\(Received(?:[^)]+)? from ([^)]+)\):\s*(.*)/);
+    if (!m || !m[2].includes('=')) return;
+    const sender = m[1].trim();
+    if (!s.peerTelemetry[sender]) {
+      if (Object.keys(s.peerTelemetry).length >= 20) return;
+      s.peerTelemetry[sender] = {};
+    }
+    s.peerTelemetryCount++;
+    const kv = /([A-Za-z][\w ]*?)\s*=\s*(-?\d+(?:\.\d+)?)/g;
+    let kvm: RegExpExecArray | null;
+    while ((kvm = kv.exec(m[2])) !== null) {
+      s.peerTelemetry[sender][kvm[1].trim()] = Number(kvm[2]);
+    }
+  },
+
+  // ── Telemetry decode failures (#177–#178) ────────────────────────────────
+  (line, s) => {
+    const m = line.match(/Error decoding (\w+) module!/);
+    if (m) s.telemetryDecodeErrors[m[1]] = (s.telemetryDecodeErrors[m[1]] ?? 0) + 1;
+  },
+
+  (line, s) => {
+    if (/Unable to decode last packet/.test(line)) {
+      s.telemetryDecodeErrors.unknown = (s.telemetryDecodeErrors.unknown ?? 0) + 1;
+    }
+  },
+
+  // ── I2C sensor driver health (#179–#187) ──────────────────────────────────
+
+  // #179 "<Sensor>: Unable to <op>[. Error code: N]"
+  (line, s) => {
+    const m = line.match(/(\w[\w\d]*): Unable to ([^.]+?)(?:\. Error code: (\d+))?$/);
+    if (!m) return;
+    const entry = {sensor: m[1], op: m[2].trim(), ...(m[3] !== undefined && {code: Number(m[3])})};
+    const key = `${m[1]}:${entry.op}`;
+    if (!s.sensorErrors.some((e) => `${e.sensor}:${e.op}` === key)) s.sensorErrors.push(entry);
+  },
+
+  // #180 "<Sensor> not found on I2C at 0xNN"
+  (line, s) => {
+    const m = line.match(/(\w[\w\d]*) not found on I2C at (0x[\da-fA-F]+)/);
+    if (!m) return;
+    const id = `${m[1]}@${m[2]}`;
+    if (!s.sensorsNotFound.includes(id)) s.sensorsNotFound.push(id);
+  },
+
+  // #181 "Can't connect to detected <Sensor> sensor"
+  (line, s) => {
+    const m = line.match(/Can.t connect to detected (\w+) sensor\. Remove from nodeTelemetrySensorsMap/);
+    if (!m) return;
+    if (!s.sensorsDropped.includes(m[1])) s.sensorsDropped.push(m[1]);
+  },
+
+  // #182 "<Sensor> read failed: incomplete data (N bytes)"
+  (line, s) => {
+    if (/\w+ read failed: incomplete data \(\d+ bytes\)/.test(line)) s.sensorReadFailures++;
+  },
+
+  // #183 "<Sensor> checksum failed"
+  (line, s) => {
+    if (/\w+ checksum failed: computed 0x[\da-fA-F]+, received 0x[\da-fA-F]+/.test(line)) {
+      s.sensorChecksumFailures++;
+    }
+  },
+
+  // #184 "<Sensor> frame header invalid"
+  (line, s) => {
+    if (/\w+ frame header invalid: 0x[\da-fA-F]+ 0x[\da-fA-F]+/.test(line)) s.sensorFrameErrors++;
+  },
+
+  // #185 Sensor vs display I2C clock conflict
+  (line, s) => {
+    const m = line.match(/(\w+) can.t be used at this clock speed, with a screen/);
+    if (!m) return;
+    if (!s.sensorClockConflict.includes(m[1])) s.sensorClockConflict.push(m[1]);
+  },
+
+  // #186 Calibration / state file save failure
+  (line, s) => {
+    if (/Failed to save calibration data|Can.t remove old state file/.test(line)) {
+      s.sensorCalibSaveFailed = true;
+    }
+  },
+
+  // #187 BME680 / BSEC2 library status code
+  (line, s) => {
+    const m = line.match(/(\w+) (BSEC2|BME68X) code: (-?\d+)/);
+    if (m) s.bme680LibCode = {sensor: m[1], lib: m[2], code: Number(m[3])};
+  },
+
+  // ── Feature module diagnostics (#188–#201) ────────────────────────────────
+
+  // #188 Config applied but not saved to disk
+  (line, s) => {
+    if (/Config applied but save failed|Failed to save config changes to disk/.test(line)) {
+      s.adminConfigSaveFailed = true;
+      s.configSaveFailures++;
+    }
+  },
+
+  // #189 AdminModule dropped payload — storage locked
+  (line, s) => {
+    if (/AdminModule: dropping admin payload.*storage locked/.test(line)) {
+      s.adminDroppedStorageLocked++;
+    }
+  },
+
+  // #190 Admin message without session key (security)
+  (line, s) => {
+    if (/Admin message without session_key!/.test(line)) s.adminNoSessionKey++;
+  },
+
+  // #191 Invalid serial module config
+  (line, s) => {
+    if (/Invalid serial config/.test(line)) s.invalidSerialConfig = true;
+  },
+
+  // #192 Unsigned NodeInfo from previously-signing node (key downgrade / spoof)
+  (line, s) => {
+    const m = line.match(/Dropping unsigned NodeInfo from node (0x[\da-fA-F]+) that previously signed/);
+    if (!m) return;
+    s.unsignedNodeInfoDropped++;
+    if (!s.nodeKeyDowngrade.includes(m[1])) s.nodeKeyDowngrade.push(m[1]);
+  },
+
+  // #193 NodeInfo is_licensed mismatch
+  (line, s) => {
+    if (/Invalid nodeInfo detected, is_licensed mismatch/.test(line)) {
+      s.nodeInfoLicensedMismatch = true;
+    }
+  },
+
+  // #194 Key verification (Hash2) mismatch
+  (line, s) => {
+    if (/Hash2 did not match/.test(line)) s.keyVerificationFailures++;
+  },
+
+  // #195 Store & Forward PSRAM full
+  (line, s) => {
+    if (/S&F - PSRAM Full\. Starting overwrite/.test(line)) s.storeForwardPsramFull = true;
+  },
+
+  // #196 Neighbor DB eviction
+  (line, s) => {
+    if (/Neighbor DB is full, replace oldest neighbor/.test(line)) s.neighborDbFull++;
+  },
+
+  // #197 TraceRoute hop limit exceeded
+  (line, s) => {
+    if (/Route exceeded maximum hop limit!/.test(line)) s.tracerouteHopLimitExceeded++;
+  },
+
+  // #198 TraceRoute allocation / null / self errors
+  (line, s) => {
+    // eslint-disable-next-line max-len
+    if (/Cannot trace route to self|Failed to allocate TraceRoute packet|MeshService is NULL!|Invalid node number for trace route/.test(line)) {
+      s.tracerouteErrors++;
+    }
+  },
+
+  // #199 Position publish skipped — no GPS fix yet or position privacy
+  (line, s) => {
+    if (/Skip position send because lat\/lon are zero!/.test(line)) s.positionZeroSkipped++;
+  },
+
+  // #200 Detection sensor module misconfigured (no monitor pin)
+  (line, s) => {
+    if (/Detection Sensor Module:.*no monitor pin is set/.test(line)) {
+      s.detectionMisconfigured = true;
+    }
+  },
+
+  // #201 FEM LNA mode configured but chip doesn't support it
+  (line, s) => {
+    if (/FEM LNA mode configured but current FEM does not support LNA control/.test(line)) {
+      s.femLnaUnsupported = true;
+    }
+  },
 ];
 
 export function updateSummary(line: string, summary: DeviceSummary): void {
@@ -928,7 +1916,31 @@ export function renderSummary(s: DeviceSummary): string {
     s.nodeDbDiscardedOldVersion || s.configVersionMismatch ||
     s.codingRateOverride || s.packetCounterCorrupted ||
     s.fsOrphan || s.pkiKeysRegenerated || s.factoryReset ||
-    s.invalidLoraConfig || s.missingCriticalPrefs.length > 0
+    s.invalidLoraConfig || s.missingCriticalPrefs.length > 0 ||
+    s.taskWatchdogTriggered || s.espPanicBacktrace || s.radioAssertFailed ||
+    s.criticalErrors.length > 0 || s.radioInitRetries > 0 || s.warmstoreRingCorrupt ||
+    s.deviceStateDiscarded || s.busyTxCount > 5 || s.fromRadioQOverflow > 0 ||
+    s.pkiClientKeyMismatch || s.pkiUnknownKeyDmRefused > 0 ||
+    s.radioBusyTxHardwareFailure || s.startTransmitFailures > 0 ||
+    s.radioRecoveryReboot || s.filesystemMountFailed || s.storageDecryptCorrupt ||
+    s.encryptionFailures > 0 || s.queuePushFailures > 0 || s.safeFileWriteFailures > 0 ||
+    s.lockdownActive || s.critLogCount > 0 || s.missingPrefs.length > 0 ||
+    s.powerChipFailures.length > 0 || s.gpsNotDetected || s.packetHistoryCorrupt ||
+    s.enteredDfuMode || s.scheduledReboot || s.adcErrors > 0 ||
+    s.tcxoFallbackToXtal || s.gpsSearchFailures > 0 || (s.gpsChecksumFailTotal ?? 0) > 0 ||
+    s.gpsBufferFullEvents > 0 || s.gpsFrameErrors > 0 || s.gpsConfigNacks > 0 ||
+    s.gpsConfigTimeouts > 0 || s.gpsAtgmConfigFailures > 0 || s.gpsConfigSaveFailed ||
+    s.gpsDefaultsMaintained || s.gpsBogusValueRejects > 0 ||
+    s.sensorErrors.length > 0 || s.sensorsDropped.length > 0 ||
+    s.sensorReadFailures > 0 || s.sensorChecksumFailures > 0 ||
+    s.sensorFrameErrors > 0 || s.sensorClockConflict.length > 0 ||
+    s.sensorCalibSaveFailed || s.adminConfigSaveFailed ||
+    s.configSaveFailures > 0 || s.adminDroppedStorageLocked > 0 ||
+    s.adminNoSessionKey > 0 || s.unsignedNodeInfoDropped > 0 ||
+    s.nodeInfoLicensedMismatch || s.keyVerificationFailures > 0 ||
+    s.storeForwardPsramFull || s.tracerouteErrors > 0 ||
+    s.detectionMisconfigured || s.femLnaUnsupported ||
+    Object.keys(s.telemetryDecodeErrors).length > 0
   );
   if (!s.hardware && !s.firmware && !s.radioType && !hasEvents) return '';
 
@@ -1082,6 +2094,108 @@ export function renderSummary(s: DeviceSummary): string {
     const lock = s.gpsLock ? '<span style="color:#67EA94">locked</span>' : 'no lock';
     const sats = s.gpsSats !== undefined ? ` · ${s.gpsSats} sat${s.gpsSats === 1 ? '' : 's'}` : '';
     modRows.push(['GPS', lock + sats]);
+  }
+
+  if (s.gpsLockTimeSecs !== undefined || s.gpsLocksAcquired > 0) {
+    const t = s.gpsLockTimeSecs !== undefined ? `${s.gpsLockTimeSecs}s to lock` : '';
+    const c = s.gpsLocksAcquired > 0 ? `×${s.gpsLocksAcquired} acquired` : '';
+    modRows.push(['GPS lock', [t, c].filter(Boolean).join(' · '),
+      'Time to first fix and lock acquisition count in this session']);
+  }
+
+  if (s.gpsConsecutiveLockFailures !== undefined) {
+    const cls = s.gpsConsecutiveLockFailures > 3 ? ' class="sum-warn"' : '';
+    modRows.push(['GPS failures',
+      `<span${cls}>${s.gpsConsecutiveLockFailures} consecutive · ${s.gpsSearchFailures} searches</span>`,
+      'Consecutive lock failures (rising = chip blind); resets to 0 on any successful fix']);
+  }
+
+  if (s.gpsConstellations) {
+    modRows.push(['GNSS', s.gpsConstellations,
+      'Constellation configuration acknowledged by the module']);
+  }
+
+  if (s.gpsPowerState) {
+    const t = s.gpsPowerStateTransitions > 1 ? ` (×${s.gpsPowerStateTransitions} transitions)` : '';
+    modRows.push(['GPS power', s.gpsPowerState + t,
+      'Most recent GPS power state transition']);
+  }
+
+  if (s.gpsUserMode) {
+    modRows.push(['GPS mode', s.gpsUserMode,
+      'User-toggled GPS enable/disable setting at end of log']);
+  }
+
+  if (s.rtcDriftCorrections > 0) {
+    const drift = s.lastClockDriftSecs !== undefined ? ` · last ${s.lastClockDriftSecs}s drift` : '';
+    const driftStr = `×${s.rtcDriftCorrections} correction${s.rtcDriftCorrections !== 1 ? 's' : ''}${drift}`;
+    modRows.push(['Clock drift', driftStr,
+      'External time applied to correct RTC drift; frequent or large drift indicates crystal instability']);
+  }
+
+  if (s.envTemperature !== undefined || s.envHumidity !== undefined || s.envPressure !== undefined) {
+    const parts: string[] = [];
+    if (s.envTemperature !== undefined) parts.push(`${s.envTemperature.toFixed(1)}°C`);
+    if (s.envHumidity !== undefined) parts.push(`${s.envHumidity.toFixed(1)}%`);
+    if (s.envPressure !== undefined) parts.push(`${s.envPressure.toFixed(0)} hPa`);
+    if (s.envGasResistance !== undefined) parts.push(`gas ${s.envGasResistance.toFixed(0)}Ω`);
+    modRows.push(['Env sensor', parts.join(' · ')]);
+  }
+
+  if (s.co2 !== undefined) {
+    const extra = s.co2Temp !== undefined ? ` · ${s.co2Temp.toFixed(1)}°C · ${s.co2Humidity?.toFixed(1)}%` : '';
+    modRows.push(['CO₂', `${s.co2} ppm${extra}`]);
+  }
+
+  if (s.pm25 !== undefined) {
+    modRows.push(['PM2.5/10/100', `${s.pm25} / ${s.pm10} / ${s.pm100 ?? '?'} µg/m³`,
+      'Particulate matter concentrations (standard units)']);
+  }
+
+  if (s.iaq !== undefined || s.lux !== undefined) {
+    const parts: string[] = [];
+    if (s.iaq !== undefined) parts.push(`IAQ ${s.iaq}`);
+    if (s.lux !== undefined) parts.push(`${s.lux.toFixed(0)} lux`);
+    if (s.distance !== undefined) parts.push(`dist ${s.distance.toFixed(0)}mm`);
+    modRows.push(['Light/IAQ', parts.join(' · ')]);
+  }
+
+  if (s.hcho !== undefined) {
+    modRows.push(['HCHO/VOC', `${s.hcho.toFixed(3)} mg/m³`]);
+  }
+
+  if (s.radiation !== undefined) {
+    modRows.push(['Radiation', `${s.radiation} µR/h`]);
+  }
+
+  if (s.windSpeed !== undefined) {
+    modRows.push(['Wind', `${s.windSpeed.toFixed(1)} m/s · ${s.windDir}°`]);
+  }
+
+  if (s.soilTemp !== undefined) {
+    modRows.push(['Soil', `${s.soilTemp.toFixed(1)}°C · ${s.soilMoisture}% moisture`]);
+  }
+
+  if (s.heartBpm !== undefined) {
+    modRows.push(['Health', `${s.heartBpm} bpm · SpO₂ ${s.spo2}%`]);
+  }
+
+  if (s.ch1V !== undefined) {
+    const inaStr = `CH1 ${s.ch1V?.toFixed(2)}V ${s.ch1I?.toFixed(0)}mA` +
+      ` · CH2 ${s.ch2V?.toFixed(2)}V ${s.ch2I?.toFixed(0)}mA`;
+    modRows.push(['Power INA', inaStr]);
+  }
+
+  if (s.hostUptime !== undefined) {
+    const load = s.hostLoad ? `load ${s.hostLoad.map((l) => l.toFixed(2)).join('/')}` : '';
+    const disk = s.hostDiskFree !== undefined ? ` · ${fmtBytes(s.hostDiskFree * 1024)} disk free` : '';
+    modRows.push(['Host', `${fmtUptime(s.hostUptime)} · ${load}${disk}`]);
+  }
+
+  if (s.peerTelemetryCount > 0) {
+    const peers = Object.keys(s.peerTelemetry).length;
+    modRows.push(['Peer TM', `${s.peerTelemetryCount} samples from ${peers} node${peers !== 1 ? 's' : ''}`,
+      'Telemetry received from neighbouring nodes in this log session']);
   }
 
   if (s.airUtilTx !== undefined) {
@@ -1312,6 +2426,453 @@ export function renderSummary(s: DeviceSummary): string {
       '<span class="sum-warn">invalid values received — corrected by firmware</span>',
       'The client sent an invalid LoRa config (e.g. coding_rate/spread_factor 0, or a preset ' +
       'incompatible with the region); the firmware substituted corrected values.']);
+  }
+
+  // ── New events (94–140) ──────────────────────────────────────────────────────
+
+  if (s.lockdownActive) {
+    evtRows.push(['Lockdown',
+      `<span class="sum-err">🔒 ${s.lockdownState ?? 'active'}</span>`,
+      'Device entered lockdown — may require admin provisioning to recover.']);
+  }
+  if (s.taskWatchdogTriggered) {
+    const task = s.watchdogTask ? ` (starved task: ${s.watchdogTask})` : '';
+    evtRows.push(['Task WDT',
+      `<span class="sum-err">ESP-IDF task watchdog fired${task}</span>`,
+      'The ESP-IDF task watchdog detected a starved task — indicates a blocking loop or deadlock.']);
+  }
+  if (s.espPanicBacktrace) {
+    const pc = s.panicPc ? ` PC: ${s.panicPc}` : '';
+    evtRows.push(['Panic',
+      `<span class="sum-err">ESP32 panic backtrace${pc}</span>`,
+      'A hard fault / panic was triggered. Load the ELF and run addr2line on the backtrace PCs.']);
+  }
+  if (s.radioAssertFailed) {
+    const locs = s.assertLocations.join(', ');
+    evtRows.push(['Radio assert',
+      `<span class="sum-err">assert failed: ${locs}</span>`,
+      'RadioIf assertion tripped — radio driver reached an impossible state. ' +
+      'Usually follows SPI_CMD_FAILED or a wedged radio.']);
+  }
+  if (s.criticalErrors.length > 0) {
+    const parts = s.criticalErrors.map((e) => {
+      const name = CRIT_ERR[e.code] ?? `code ${e.code}`;
+      return `${name} @ ${e.file}:${e.line}`;
+    }).join(' · ');
+    evtRows.push(['Critical error',
+      `<span class="sum-err">${parts}</span>`,
+      'Firmware recorded a CriticalErrorCode — see meshtastic/mesh.proto for the enum.']);
+  }
+  if (s.radioBusyTxHardwareFailure) {
+    evtRows.push(['Radio HW fail',
+      '<span class="sum-err">busyTx > 60 s — radio wedged in TX</span>',
+      'The radio hardware appeared stuck transmitting for over 60 seconds. ' +
+      'Antenna, RF stage, or SPI fault. A reset is usually required.']);
+  }
+  if (s.radioRecoveryReboot) {
+    evtRows.push(['LoRa recovery',
+      '<span class="sum-err">reconfigure failed — device rebooting</span>',
+      'The radio reconfiguration failed and the firmware triggered a reboot to recover.']);
+  }
+  if (s.warmstoreRingCorrupt) {
+    const pages = s.warmstoreBadPages !== undefined ? ` (${s.warmstoreBadPages} bad pages)` : '';
+    evtRows.push(['WarmStore',
+      `<span class="sum-err">ring unreadable${pages} — node cache empty</span>`,
+      'The WarmStore ring buffer had bad pages; the node cache was discarded and will be rebuilt.']);
+  }
+  if (s.deviceStateDiscarded) {
+    evtRows.push(['Device state',
+      '<span class="sum-warn">old or invalid, discarded — clean rebuild</span>',
+      'The saved device state was an unsupported version; it was discarded and rebuilt from scratch.']);
+  }
+  if (s.storageDecryptCorrupt) {
+    evtRows.push(['Decrypt fail',
+      '<span class="sum-err">storage decrypt failed — treated as corrupt</span>',
+      'A persisted file could not be decrypted/decoded and was treated as corrupt. ' +
+      'Settings may be lost — check encrypted storage key.']);
+  }
+  if (s.filesystemMountFailed) {
+    evtRows.push(['FS mount',
+      '<span class="sum-err">filesystem mount failed — storage unavailable</span>',
+      'The LittleFS/SPIFFS partition failed to mount. ' +
+      'Settings will not persist. A full erase + reflash is likely required.']);
+  }
+  if (s.encryptionFailures > 0) {
+    evtRows.push(['Encrypt fail',
+      `<span class="sum-err">×${s.encryptionFailures} encryption / OOM errors</span>`,
+      'SafeFile encrypted writes failed — settings may not be persisted. Possible RAM pressure.']);
+  }
+  if (s.queuePushFailures > 0) {
+    evtRows.push(['Queue full',
+      `<span class="sum-err">×${s.queuePushFailures} CRIT: queue push failed</span>`,
+      'toPhone / MQTT / notification queue pushes failed at CRIT severity — packets were dropped.']);
+  }
+  if (s.safeFileWriteFailures > 0) {
+    evtRows.push(['SafeFile',
+      `<span class="sum-warn">×${s.safeFileWriteFailures} write integrity failure</span>`,
+      'SafeFile readback hash mismatch or rename failure — a settings write did not complete safely.']);
+  }
+  if (s.pkiClientKeyMismatch) {
+    evtRows.push(['PKI mismatch',
+      '<span class="sum-warn">client public key differs from stored key</span>',
+      'The connecting client presented a public key that does not match what the node has stored. ' +
+      'Could indicate key rotation or a replay attack.']);
+  }
+  if (s.pkiUnknownKeyDmRefused > 0) {
+    evtRows.push(['PKI DM blocked',
+      `<span class="sum-warn">×${s.pkiUnknownKeyDmRefused} DM refused (unknown key)</span>`,
+      'Direct messages were refused because the destination node\'s public key is not known. ' +
+      'The nodes may not have exchanged node-info yet.']);
+  }
+  if (s.critLogCount > 0) {
+    evtRows.push(['CRIT logs',
+      `<span class="sum-err">×${s.critLogCount} CRIT-level log lines</span>`,
+      s.lastCritLog ? `Last: ${s.lastCritLog}` :
+        'CRIT-level lines (queue overflow / unrecoverable storage failures)']);
+  }
+  if (s.radioInitRetries > 0) {
+    const rn = s.radioInitRetries;
+    const plural = rn !== 1 ? 'ies' : '';
+    const errCode = s.radioInitError ? RADIOLIB_ERR[Number(s.radioInitError)] ?? s.radioInitError : '';
+    const errStr = errCode ? ` (${errCode})` : '';
+    evtRows.push(['Radio init',
+      `<span class="sum-warn">×${rn} init retr${plural}${errStr}</span>`,
+      'Radio chip initialisation failed and was retried — usually SPI/power/TCXO instability.']);
+  }
+  if (s.startTransmitFailures > 0) {
+    const err = s.lastStartTransmitError ?
+      ` (${RADIOLIB_ERR[Number(s.lastStartTransmitError)] ?? s.lastStartTransmitError})` : '';
+    evtRows.push(['TX fail',
+      `<span class="sum-warn">×${s.startTransmitFailures} startTransmit failed${err}</span>`,
+      'RadioLib startTransmit() returned an error — the radio could not begin a transmission.']);
+  }
+  if (s.radioStartReceiveErrors > 0) {
+    const err = s.lastStartReceiveError ?
+      ` (${RADIOLIB_ERR[Number(s.lastStartReceiveError)] ?? s.lastStartReceiveError})` : '';
+    evtRows.push(['RX start fail',
+      `<span class="sum-warn">×${s.radioStartReceiveErrors} StartReceive error${err}</span>`,
+      'RadioIf StartReceive() returned an error — the radio could not be put back into RX mode.']);
+  }
+  if (s.radioLibErrors.length > 0) {
+    const parts = s.radioLibErrors.map((e) => {
+      const name = RADIOLIB_ERR[e.code] ?? String(e.code);
+      return `${e.radio} ${e.op} ${name}`;
+    }).join(' · ');
+    evtRows.push(['RadioLib err',
+      `<span class="sum-warn">${parts}</span>`,
+      'RadioLib returned error codes during radio operations. ' +
+      'SPI_CMD_FAILED (-707) is the most common and usually indicates SPI/TCXO instability.']);
+  }
+  if (s.fromRadioQOverflow > 0) {
+    evtRows.push(['RX queue',
+      `<span class="sum-warn">×${s.fromRadioQOverflow} fromRadioQ full — packets dropped</span>`,
+      'The queue from the radio to the Router overflowed. ' +
+      'Usually caused by a burst of traffic faster than the Router can process.']);
+  }
+  if (s.busyTxCount > 5) {
+    const cls = s.busyTxCount > 20 ? 'sum-warn' : '';
+    const txt = `×${s.busyTxCount} busyTx`;
+    evtRows.push(['busyTx', cls ? `<span class="${cls}">${txt}</span>` : txt,
+      'TX was attempted while the radio was already transmitting — indicates TX queue pressure.']);
+  }
+  if (s.powerChipFailures.length > 0) {
+    evtRows.push(['Power chip',
+      `<span class="sum-warn">${s.powerChipFailures.join(', ')} init failed</span>`,
+      'Power management chip(s) failed to initialise — battery readings and charging control ' +
+      'may be unavailable.']);
+  }
+  if (s.gpsNotDetected) {
+    evtRows.push(['GPS', 'not detected — marked absent for this boot',
+      'No GNSS module was found during probing or the probe was given up. GPS is disabled.']);
+  }
+  if (s.tcxoFallbackToXtal) {
+    evtRows.push(['TCXO→XTAL',
+      '<span class="sum-warn">radio fell back to XTAL oscillator mode</span>',
+      'TCXO init failed; radio is running on a crystal oscillator. ' +
+      'Expect increased frequency drift, temperature-dependent SNR degradation, and a higher freq offset.']);
+  }
+  if (s.gpsSearchFailures > 0) {
+    const consec = s.gpsConsecutiveLockFailures !== undefined ?
+      ` · ${s.gpsConsecutiveLockFailures} consecutive` : '';
+    const cls = (s.gpsConsecutiveLockFailures ?? 0) > 3 ? 'sum-warn' : 'sum-note';
+    evtRows.push(['GPS search',
+      `<span class="${cls}">×${s.gpsSearchFailures} ended without fix${consec}</span>`,
+      'GPS searches timed out without acquiring a fix. Rising consecutive-failure count means ' +
+      'the chip is blind — check antenna, sky view, and baud rate.']);
+  }
+  if ((s.gpsChecksumFailTotal ?? 0) > 0) {
+    const delta = s.gpsChecksumFailDelta !== undefined ? ` (+${s.gpsChecksumFailDelta} new)` : '';
+    evtRows.push(['GPS checksum',
+      `<span class="sum-warn">×${s.gpsChecksumFailTotal} NMEA checksum failures${delta}</span>`,
+      'NMEA sentence checksum mismatches — EMI, loose wiring, or baud rate mismatch.']);
+  }
+  if (s.gpsBufferFullEvents > 0) {
+    const bytes = s.gpsBufferFullBytes !== undefined ? ` · ${s.gpsBufferFullBytes}B pending` : '';
+    evtRows.push(['GPS buffer',
+      `<span class="sum-warn">×${s.gpsBufferFullEvents} UART buffer full${bytes}</span>`,
+      'GPS UART buffer overran — CPU could not drain it fast enough. Correlate with task-watchdog events.']);
+  }
+  if (s.gpsFrameErrors > 0) {
+    const baud = s.gpsFrameErrorBaud ? ` at ${s.gpsFrameErrorBaud} baud` : '';
+    evtRows.push(['GPS framing',
+      `<span class="sum-warn">×${s.gpsFrameErrors} UBlox frame error${baud}</span>`,
+      'UBlox framing errors indicate a baud rate mismatch between firmware and GPS module.']);
+  }
+  if (s.gpsStaleDataEvents > 0) {
+    evtRows.push(['GPS stale',
+      `×${s.gpsStaleDataEvents} stale-data event`,
+      'GPS position or time data aged out before a fresh fix arrived.']);
+  }
+  if (s.gpsBogusValueRejects > 0) {
+    evtRows.push(['GPS bogus',
+      `×${s.gpsBogusValueRejects} bogus NMEA value rejected`,
+      'HDOP or course values were out of range and discarded — malformed NMEA sentences.']);
+  }
+  if (s.gpsConfigNacks > 0) {
+    const msgs = s.gpsNackedMessages.length > 0 ? ` (${s.gpsNackedMessages.join(', ')})` : '';
+    evtRows.push(['GPS NACK',
+      `<span class="sum-warn">×${s.gpsConfigNacks} config NACKed${msgs}</span>`,
+      'The GPS module rejected config commands. Module may be running on defaults (wrong rate/constellation).']);
+  }
+  if (s.gpsConfigTimeouts > 0) {
+    const msgs = s.gpsTimedOutMessages.length > 0 ? ` (${s.gpsTimedOutMessages.join(', ')})` : '';
+    evtRows.push(['GPS timeout',
+      `<span class="sum-warn">×${s.gpsConfigTimeouts} config no response${msgs}</span>`,
+      'GPS module did not respond to config commands — communication problem or wrong baud.']);
+  }
+  if (s.gpsAtgmConfigFailures > 0) {
+    evtRows.push(['ATGM config',
+      `<span class="sum-warn">×${s.gpsAtgmConfigFailures} ATGM336H config failure</span>`,
+      'ATGM336H could not be configured — NMEA rate, constellation, or update frequency not set.']);
+  }
+  if (s.gpsConfigSaveFailed) {
+    evtRows.push(['GNSS save',
+      '<span class="sum-warn">unable to save GNSS module config</span>',
+      'Configuration save to the GNSS module failed — settings will not persist across power cycles.']);
+  }
+  if (s.gpsDefaultsMaintained) {
+    evtRows.push(['GNSS defaults',
+      '<span class="sum-warn">reconfigure refused — defaults maintained</span>',
+      'GNSS module refused constellation reconfiguration; likely a GPS-only module. ' +
+      'Multi-constellation config will not take effect.']);
+  }
+  if (s.gpsProbeCacheStale) {
+    evtRows.push(['GPS cache',
+      `stale probe cleared${s.gpsStaleProbe ? ` (was ${s.gpsStaleProbe})` : ''}`,
+      'Cached GPS module identity was stale and cleared; a fresh probe will run.']);
+  }
+  if (s.gpsNoLockPublishFailures > 0) {
+    evtRows.push(['GPS pub fail',
+      `×${s.gpsNoLockPublishFailures} publish skipped (no lock)`,
+      'Position publish was skipped because no GPS lock was acquired in time.']);
+  }
+  if (s.packetHistoryCorrupt) {
+    evtRows.push(['Pkt history',
+      '<span class="sum-warn">invalid size — reset to default</span>',
+      'The packet deduplication history had an invalid size and was reset.']);
+  }
+  if (s.encryptedStorageLockedSkips > 0) {
+    evtRows.push(['Storage locked',
+      `<span class="sum-warn">×${s.encryptedStorageLockedSkips} saves skipped (locked)</span>`,
+      'Encrypted storage was locked — save operations were skipped. ' +
+      'Settings written during lockout are not persisted.']);
+  }
+  if (s.unsafePowerSaveBlocked > 0) {
+    evtRows.push(['Low-power save',
+      `<span class="sum-warn">×${s.unsafePowerSaveBlocked} save blocked (unsafe voltage)</span>`,
+      'Settings save was refused because battery voltage was too low. ' +
+      'Config changes may not survive this reboot.']);
+  }
+  if (s.adcErrors > 0) {
+    evtRows.push(['ADC',
+      `<span class="sum-warn">×${s.adcErrors} ADC init/calibration error</span>`,
+      'ADC initialisation or calibration failed — battery percentage readings may be unreliable.']);
+  }
+  if (s.missingPrefs.length > 0) {
+    evtRows.push(['Prefs (opt)',
+      `${s.missingPrefs.join(', ')} not found — defaults used`,
+      'Optional preference files were missing; defaults were installed. ' +
+      'Normal on first boot; on an existing device may indicate UI config loss.']);
+  }
+  if (s.scheduledReboot) {
+    evtRows.push(['Reboot sched',
+      `rebooting in ${s.scheduledRebootSecs ?? '?'} s`,
+      'The firmware scheduled a deliberate reboot (e.g. after a firmware update or config change).']);
+  }
+  if (s.enteredDfuMode) {
+    evtRows.push(['DFU mode',
+      '<span class="sum-warn">device entered DFU (firmware update) mode</span>',
+      'The device rebooted into DFU mode for a firmware update. Log ends here.']);
+  }
+  if (s.regionPresetSwap) {
+    const {preset, from, to} = s.regionPresetSwap;
+    evtRows.push(['Region swap',
+      `${preset}: ${from} → ${to}`,
+      `The ${preset} preset automatically swapped the region from ${from} to ${to}.`]);
+  }
+  if (s.configCoerced) {
+    evtRows.push(['Config coerce',
+      'telemetry/position intervals coerced to role-aware minimum',
+      'Config values were below the minimum allowed for the node role and were raised automatically.']);
+  }
+  if (s.unsupported24GhzReverted) {
+    evtRows.push(['2.4 GHz',
+      '<span class="sum-warn">chip does not support 2.4 GHz — region reverted to UNSET</span>',
+      'A 2.4 GHz frequency was configured but the radio chip does not support it; region was reset.']);
+  }
+  if (s.rxSensitivityPatchFailed) {
+    evtRows.push(['RX patch',
+      '<span class="sum-warn">0x8B5 RX sensitivity patch failed</span>',
+      'The SX126x RX sensitivity workaround (register 0x8B5 patch) could not be applied. ' +
+      'Receive sensitivity may be degraded.']);
+  }
+  if (s.loraErrorRecoveries > 0) {
+    evtRows.push(['LoRa recovery',
+      `×${s.loraErrorRecoveries} LoRa-in-error recovery attempted`,
+      'The firmware detected a LoRa radio error and attempted to recover without rebooting.']);
+  }
+  if (s.agcCalibFailures > 0) {
+    evtRows.push(['AGC calib',
+      `<span class="sum-warn">×${s.agcCalibFailures} calibration timeout</span>`,
+      'AGC calibration reset timed out — indicates radio hardware stress or SPI instability.']);
+  }
+  if (s.missedTxDone > 0 || s.missedRxDone > 0) {
+    const parts: string[] = [];
+    if (s.missedTxDone > 0) parts.push(`TX_DONE ×${s.missedTxDone}`);
+    if (s.missedRxDone > 0) parts.push(`RX_DONE ×${s.missedRxDone}`);
+    evtRows.push(['Missed IRQ',
+      parts.join(' · '),
+      'Radio interrupts were missed (caught and recovered). Occasional occurrences are normal; ' +
+      'frequent misses indicate IRQ latency or SPI contention.']);
+  }
+  if (s.rxInterruptWrongMode > 0) {
+    evtRows.push(['RX ISR',
+      `<span class="sum-warn">×${s.rxInterruptWrongMode} ISR wrong mode</span>`,
+      'handleReceiveInterrupt was called while the radio was not in RX mode — ' +
+      'indicates a radio state desync that may cause missed packets.']);
+  }
+  if (s.espSleepErrors > 0) {
+    evtRows.push(['Sleep err',
+      `<span class="sum-warn">×${s.espSleepErrors} ESP sleep API error</span>`,
+      'esp_light_sleep_start or esp_sleep_enable_*_wakeup returned a non-zero result. ' +
+      'Power consumption may be higher than expected.']);
+  }
+  if (s.retransmissions > 0 || s.naksReceived > 0) {
+    const parts: string[] = [];
+    if (s.retransmissions > 0) parts.push(`${s.retransmissions} retx`);
+    if (s.naksReceived > 0) parts.push(`${s.naksReceived} NAK rcvd`);
+    evtRows.push(['Retransmit', parts.join(' · '),
+      'Reliable-send retransmissions and NAKs received from peers. ' +
+      'High counts indicate poor link quality or congestion.']);
+  }
+
+  // ── Sensor / module diagnostics ──────────────────────────────────────────
+
+  if (s.sensorsDropped.length > 0) {
+    evtRows.push(['Sensor drop',
+      `<span class="sum-warn">${s.sensorsDropped.join(', ')} dropped — can't connect</span>`,
+      'Sensor detected on I2C scan but driver could not communicate with it. ' +
+      'Check wiring, I2C address, and module variant.']);
+  }
+  if (s.sensorErrors.length > 0) {
+    const parts = s.sensorErrors.map((e) => {
+      const code = e.code !== undefined ? ` (${e.code})` : '';
+      return `${e.sensor}: ${e.op}${code}`;
+    });
+    evtRows.push(['Sensor error',
+      `<span class="sum-warn">${parts.join(' · ')}</span>`,
+      'I2C sensor driver failed an operation. Distinct sensor+op pairs shown; ' +
+      'repeated failures are deduplicated.']);
+  }
+  if (s.sensorReadFailures > 0) {
+    evtRows.push(['Sensor read',
+      `<span class="sum-warn">×${s.sensorReadFailures} incomplete read</span>`,
+      'Sensor returned fewer bytes than expected — intermittent bus fault.']);
+  }
+  if (s.sensorChecksumFailures > 0) {
+    evtRows.push(['Sensor CRC',
+      `<span class="sum-warn">×${s.sensorChecksumFailures} checksum mismatch</span>`,
+      'Sensor CRC/checksum errors — EMI, loose wiring, or bus contention. ' +
+      'Pairs with GPS checksum failures if it is a board-wide bus issue.']);
+  }
+  if (s.sensorFrameErrors > 0) {
+    evtRows.push(['Sensor frame',
+      `<span class="sum-warn">×${s.sensorFrameErrors} frame header invalid</span>`,
+      'Sensor sent an unrecognised frame header — driver/chip mismatch or partial read.']);
+  }
+  if (s.sensorClockConflict.length > 0) {
+    evtRows.push(['I2C clock',
+      `<span class="sum-warn">${s.sensorClockConflict.join(', ')} disabled (screen clock conflict)</span>`,
+      'Display forces a slower I2C clock speed that the sensor cannot use. Sensor is disabled.']);
+  }
+  if (s.sensorCalibSaveFailed) {
+    evtRows.push(['Sensor calib',
+      '<span class="sum-warn">calibration / state file save failed</span>',
+      'BSEC2 or sensor calibration state could not be saved — calibration restarts on next boot.']);
+  }
+  if (Object.keys(s.telemetryDecodeErrors).length > 0) {
+    const parts = Object.entries(s.telemetryDecodeErrors)
+        .map(([k, n]) => `${k}×${n}`).join(' · ');
+    evtRows.push(['TM decode',
+      `<span class="sum-warn">${parts} decode error</span>`,
+      'Telemetry protobuf decode failed — packet corruption or firmware mismatch.']);
+  }
+  if (s.adminConfigSaveFailed || s.configSaveFailures > 0) {
+    evtRows.push(['Config save',
+      `<span class="sum-warn">×${s.configSaveFailures} config change not saved to disk</span>`,
+      'Admin-applied config change was accepted but not persisted. ' +
+      'Device will revert to previous config on reboot.']);
+  }
+  if (s.adminDroppedStorageLocked > 0) {
+    evtRows.push(['Admin drop',
+      `<span class="sum-warn">×${s.adminDroppedStorageLocked} admin payload dropped (storage locked)</span>`,
+      'AdminModule discarded an incoming config payload because storage was locked.']);
+  }
+  if (s.adminNoSessionKey > 0) {
+    evtRows.push(['Admin auth',
+      `<span class="sum-warn">×${s.adminNoSessionKey} admin message without session key</span>`,
+      'Admin command arrived with no session key — could indicate an older client or replay.']);
+  }
+  if (s.unsignedNodeInfoDropped > 0) {
+    const nodes = s.nodeKeyDowngrade.length > 0 ? ` (${s.nodeKeyDowngrade.join(', ')})` : '';
+    const kdSpan = `<span class="sum-err">×${s.unsignedNodeInfoDropped}` +
+      ` unsigned NodeInfo from previously-signing node${nodes}</span>`;
+    evtRows.push(['Key downgrade', kdSpan,
+      'A node that previously signed its NodeInfo sent an unsigned packet — possible key downgrade or spoof.']);
+  }
+  if (s.nodeInfoLicensedMismatch) {
+    evtRows.push(['NodeInfo mismatch',
+      '<span class="sum-warn">is_licensed flag mismatch</span>',
+      'A NodeInfo packet had an invalid is_licensed state.']);
+  }
+  if (s.keyVerificationFailures > 0) {
+    evtRows.push(['Key verify',
+      `<span class="sum-warn">×${s.keyVerificationFailures} Hash2 mismatch</span>`,
+      'Key verification (Hash2) failed — possible MitM or tampered packet.']);
+  }
+  if (s.storeForwardPsramFull) {
+    evtRows.push(['S&F PSRAM',
+      '<span class="sum-warn">PSRAM full — oldest messages overwritten</span>',
+      'Store & Forward buffer exhausted; oldest messages were overwritten by newer ones.']);
+  }
+  if (s.tracerouteErrors > 0) {
+    evtRows.push(['TraceRoute',
+      `×${s.tracerouteErrors} alloc/null/self error`,
+      'TraceRoute module encountered allocation, null-service, or self-route errors.']);
+  }
+  if (s.detectionMisconfigured) {
+    evtRows.push(['Detection mod',
+      '<span class="sum-warn">no monitor pin set — module disabled</span>',
+      'Detection Sensor Module has no GPIO monitor pin configured. Module will not function.']);
+  }
+  if (s.femLnaUnsupported) {
+    evtRows.push(['FEM LNA',
+      '<span class="sum-warn">LNA mode configured but FEM does not support it</span>',
+      'FEM LNA control was requested but the detected FEM chip does not support it.']);
+  }
+  if (s.invalidSerialConfig) {
+    evtRows.push(['Serial mod', '<span class="sum-warn">invalid serial module config</span>',
+      'Serial module config was rejected as invalid. Module may not start.']);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────

@@ -15,6 +15,8 @@ import {
   DeviceSummary, emptySummary, updateSummary, updateSummaryCumulative,
   renderSummary, renderHopChart,
 } from './logSummary';
+import {parseLog as parseSensorLog, toSeries, renderTelemetryCharts} from './sensorTelemetry';
+import {renderDiagnosis} from './diagnosis';
 import {initDeviceInfo} from './deviceInfo';
 
 declare class PortOption extends HTMLOptionElement {
@@ -61,15 +63,18 @@ let lineTip: HTMLElement | undefined;
 
 // Shared chrome (renders from the active session)
 let summaryEl: HTMLElement;
-let hopChartEl: HTMLElement;
+let dataPlotEl: HTMLElement;
+let diagnosisEl: HTMLElement;
 let interestEl: HTMLElement;
 let moduleBtnsEl: HTMLElement;
 let portChipsEl: HTMLElement | undefined;
 let infoPanelEl: HTMLElement;
-let hopsDotEl: HTMLElement;
+let dataDotEl: HTMLElement;
+let diagnosisDotEl: HTMLElement;
 let interestDotEl: HTMLElement;
 let panelSummaryEl: HTMLElement;
-let panelHopsEl: HTMLElement;
+let panelDataEl: HTMLElement;
+let panelDiagnosisEl: HTMLElement;
 let panelInterestEl: HTMLElement;
 let infoPanelVisible = false;
 
@@ -320,9 +325,10 @@ function hideInfoPanel(): void {
   active.fit.fit();
 }
 
-function switchInfoTab(panel: 'summary' | 'hops' | 'interest'): void {
+function switchInfoTab(panel: 'summary' | 'data' | 'diagnosis' | 'interest'): void {
   panelSummaryEl.hidden = panel !== 'summary';
-  panelHopsEl.hidden = panel !== 'hops';
+  panelDataEl.hidden = panel !== 'data';
+  panelDiagnosisEl.hidden = panel !== 'diagnosis';
   panelInterestEl.hidden = panel !== 'interest';
   document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset['panel'] === panel);
@@ -348,7 +354,8 @@ function addLine(s: Session, raw: string): void {
   updateSummary(clean, s.summary);
   updateSummaryCumulative(clean, s.cumulative);
   refreshSummary(s);
-  refreshHopChart(s);
+  refreshDiagnosis(s);
+  refreshDataPlot(s);
   const key = moduleKey(parseLine(clean).module);
   if (!s.seenModules.has(key)) {
     s.seenModules.add(key);
@@ -376,12 +383,28 @@ function refreshSummary(s: Session): void {
   }
 }
 
-function refreshHopChart(s: Session): void {
-  if (!hopChartEl || s !== active) return;
-  const html = renderHopChart(s.showAllBoots ? s.cumulative : s.summary);
+function refreshDiagnosis(s: Session): void {
+  if (!diagnosisEl || s !== active) return;
+  const html = renderDiagnosis(s.showAllBoots ? s.cumulative : s.summary);
+  diagnosisEl.innerHTML = html;
+  const hasAlerts = html.includes('diag-crit') || html.includes('diag-warn');
+  diagnosisDotEl?.classList.toggle('visible', hasAlerts);
+  if (hasAlerts) showInfoPanel();
+}
+
+function refreshDataPlot(s: Session): void {
+  if (!dataPlotEl || s !== active) return;
+  const sum = s.showAllBoots ? s.cumulative : s.summary;
+  const hopHtml = renderHopChart(sum);
+  // Telemetry parse is O(n) over lineHistory — only run when the panel is open.
+  let telHtml = '';
+  if (panelDataEl && !panelDataEl.hidden) {
+    telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))));
+  }
+  const html = hopHtml + telHtml;
   if (html) {
-    hopChartEl.innerHTML = html;
-    hopsDotEl?.classList.add('visible');
+    dataPlotEl.innerHTML = html;
+    dataDotEl?.classList.add('visible');
     showInfoPanel();
   }
 }
@@ -439,12 +462,15 @@ function syncChrome(): void {
   updatePiiButton();
 
   summaryEl.innerHTML = '';
-  hopChartEl.innerHTML = '';
+  dataPlotEl.innerHTML = '';
+  diagnosisEl.innerHTML = '';
   interestEl.innerHTML = '';
-  hopsDotEl.classList.remove('visible');
+  dataDotEl.classList.remove('visible');
+  diagnosisDotEl.classList.remove('visible');
   interestDotEl.classList.remove('visible');
   refreshSummary(active);
-  refreshHopChart(active);
+  refreshDiagnosis(active);
+  refreshDataPlot(active);
   refreshInterest(active);
 }
 
@@ -601,9 +627,11 @@ function clearLog(): void {
   if (s === fileSession) fileNameEl.textContent = '';
   moduleBtnsEl.innerHTML = '';
   summaryEl.innerHTML = '';
-  hopChartEl.innerHTML = '';
+  dataPlotEl.innerHTML = '';
+  diagnosisEl.innerHTML = '';
   interestEl.innerHTML = '';
-  hopsDotEl.classList.remove('visible');
+  dataDotEl.classList.remove('visible');
+  diagnosisDotEl.classList.remove('visible');
   interestDotEl.classList.remove('visible');
   hideInfoPanel();
   switchInfoTab('summary');
@@ -749,13 +777,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   summaryEl = document.getElementById('summaryContent')!;
-  hopChartEl = document.getElementById('hopChartContent')!;
+  dataPlotEl = document.getElementById('dataPlotContent')!;
+  diagnosisEl = document.getElementById('diagnosisContent')!;
   interestEl = document.getElementById('interestContent')!;
   infoPanelEl = document.getElementById('info_panel')!;
   panelSummaryEl = document.getElementById('panel_summary')!;
-  panelHopsEl = document.getElementById('panel_hops')!;
+  panelDataEl = document.getElementById('panel_data')!;
+  panelDiagnosisEl = document.getElementById('panel_diagnosis')!;
   panelInterestEl = document.getElementById('panel_interest')!;
-  hopsDotEl = document.getElementById('hops_dot')!;
+  dataDotEl = document.getElementById('data_dot')!;
+  diagnosisDotEl = document.getElementById('diagnosis_dot')!;
   interestDotEl = document.getElementById('interest_dot')!;
   moduleBtnsEl = document.getElementById('module_buttons')!;
   portChipsEl = document.getElementById('port_chips')!;
@@ -809,7 +840,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Info panel tabs
   document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
-      switchInfoTab(btn.dataset['panel'] as 'summary' | 'hops' | 'interest');
+      const panel = btn.dataset['panel'] as 'summary' | 'data' | 'diagnosis' | 'interest';
+      switchInfoTab(panel);
+      // Telemetry parse is deferred; trigger it now that the panel is visible.
+      if (panel === 'data') refreshDataPlot(active);
     });
   });
 
@@ -822,7 +856,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   allBootsCb.addEventListener('change', () => {
     active.showAllBoots = allBootsCb.checked;
     refreshSummary(active);
-    refreshHopChart(active);
+    refreshDiagnosis(active);
+    refreshDataPlot(active);
   });
 
   // Module all/none toggle
