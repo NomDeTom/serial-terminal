@@ -4,10 +4,8 @@
 // lines into a long-format row array suitable for time-series plotting.
 // Browser-safe: no Node.js APIs.
 
-// eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;]*m/g;
 function clean(line: string): string {
-  // eslint-disable-next-line no-control-regex
   return line.replace(ANSI, '').replace(/[^\x09\x20-\x7e]/g, '');
 }
 
@@ -190,21 +188,21 @@ function telLine(series: SensorSeries): string {
   }
   const xR = xMax - xMin;
   const yR = yMax - yMin;
-  const toX = (u: number) => pL + ((u - xMin) / xR) * cW;
-  const toY = (v: number) => pT + cH - ((v - yMin) / yR) * cH;
+  const X = (u: number) => pL + ((u - xMin) / xR) * cW;
+  const Y = (v: number) => pT + cH - ((v - yMin) / yR) * cH;
 
   const out: string[] = [];
 
   // Horizontal grid lines + Y labels
   for (let t = 0; t <= 3; t++) {
     const v = yMin + (t / 3) * yR;
-    const py = toY(v);
+    const y = Y(v);
     out.push(
         `<line x1="${pL}" x2="${(pL + cW).toFixed(1)}" ` +
-      `y1="${py.toFixed(1)}" y2="${py.toFixed(1)}" stroke="#374151" stroke-width="0.5"/>`,
+      `y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#374151" stroke-width="0.5"/>`,
     );
     out.push(
-        `<text x="${(pL - 3).toFixed(1)}" y="${(py + 3).toFixed(1)}" ` +
+        `<text x="${(pL - 3).toFixed(1)}" y="${(y + 3).toFixed(1)}" ` +
       `text-anchor="end" font-size="7" fill="#6b7280">${fmtV(v)}</text>`,
     );
   }
@@ -218,13 +216,13 @@ function telLine(series: SensorSeries): string {
     if (ei - si >= 2) {
       const coords: string[] = [];
       for (let j = si; j < ei; j++) {
-        coords.push(`${toX(pts[j].uptime).toFixed(1)},${toY(pts[j].value).toFixed(1)}`);
+        coords.push(`${X(pts[j].uptime).toFixed(1)},${Y(pts[j].value).toFixed(1)}`);
       }
       const base = (pT + cH).toFixed(1);
       const area = [
-        `${toX(pts[si].uptime).toFixed(1)},${base}`,
+        `${X(pts[si].uptime).toFixed(1)},${base}`,
         ...coords,
-        `${toX(pts[ei - 1].uptime).toFixed(1)},${base}`,
+        `${X(pts[ei - 1].uptime).toFixed(1)},${base}`,
       ].join(' ');
       out.push(`<polygon points="${area}" fill="${color}" opacity="0.08"/>`);
       out.push(`<polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5"/>`);
@@ -237,7 +235,7 @@ function telLine(series: SensorSeries): string {
   for (let t = 0; t <= 4; t++) {
     const u = xMin + (t / 4) * xR;
     out.push(
-        `<text x="${toX(u).toFixed(1)}" y="${ly}" ` +
+        `<text x="${X(u).toFixed(1)}" y="${ly}" ` +
       `text-anchor="middle" font-size="7" fill="#6b7280">${fmtU(u)}</text>`,
     );
   }

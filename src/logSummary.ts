@@ -1599,8 +1599,9 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // #161 Environment: barometric_pressure, current, gas_resistance, humidity, temperature
   (line, s) => {
-    // eslint-disable-next-line max-len
-    const m = line.match(/Send: barometric_pressure=([\d.-]+), current=([\d.-]+), gas_resistance=([\d.-]+), relative_humidity=([\d.-]+), temperature=([\d.-]+)/);
+    const m = line.match(
+        /Send: barometric_pressure=([\d.-]+), current=([\d.-]+), gas_resistance=([\d.-]+), relative_humidity=([\d.-]+), temperature=([\d.-]+)/
+    );
     if (!m) return;
     s.envPressure = Number(m[1]); s.envCurrent = Number(m[2]);
     s.envGasResistance = Number(m[3]); s.envHumidity = Number(m[4]);
@@ -1609,8 +1610,9 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // #162 Air quality: PM10 / PM2.5 / PM100
   (line, s) => {
-    // eslint-disable-next-line max-len
-    const m = line.match(/Send: pm10_(?:standard|environmental)=(\d+), pm25_(?:standard|environmental)=(\d+), pm100_(?:standard|environmental)=(\d+)/);
+    const m = line.match(
+        /Send: pm10_(?:standard|environmental)=(\d+), pm25_(?:standard|environmental)=(\d+), pm100_(?:standard|environmental)=(\d+)/
+    );
     if (!m) return;
     s.pm10 = Number(m[1]); s.pm25 = Number(m[2]); s.pm100 = Number(m[3]);
   },
@@ -1843,7 +1845,6 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // #198 TraceRoute allocation / null / self errors
   (line, s) => {
-    // eslint-disable-next-line max-len
     if (/Cannot trace route to self|Failed to allocate TraceRoute packet|MeshService is NULL!|Invalid node number for trace route/.test(line)) {
       s.tracerouteErrors++;
     }

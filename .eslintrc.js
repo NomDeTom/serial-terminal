@@ -25,8 +25,10 @@ module.exports = {
         "@typescript-eslint/no-explicit-any": "off",
         "@typescript-eslint/no-non-null-assertion": "off",
         "require-jsdoc": "off",
-        "max-len": ["error", {"code": 120}],
+        "max-len": ["error", {"code": 120, "ignoreRegExpLiterals": true}],
         "no-multi-spaces": ["error", {"ignoreEOLComments": true}],
+        "no-control-regex": "off",
+        "new-cap": "off",
     },
     "env": {
         "browser": true,
