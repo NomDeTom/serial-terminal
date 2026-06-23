@@ -85,6 +85,16 @@ let panelDiagnosisEl: HTMLElement;
 let panelInterestEl: HTMLElement;
 let workspaceEl: HTMLElement;
 
+// Search decoration: highlight every match in amber; brighten the active one.
+const SEARCH_DECO = {
+  matchBackground: 'rgba(245,158,11,0.25)',
+  matchBorder: 'rgba(245,158,11,0.5)',
+  matchOverviewRuler: '#f59e0b',
+  activeMatchBackground: 'rgba(245,158,11,0.75)',
+  activeMatchBorder: '#f59e0b',
+  activeMatchColorOverviewRuler: '#f59e0b',
+};
+
 // Data-panel chart controls (shared across sessions, re-applied on each render)
 let dataSuppressZero = false;
 const dataAutoRange = new Set<string>();    // series keys the user pinned to auto
@@ -513,7 +523,7 @@ function syncChrome(): void {
   searchFilterBtn.classList.toggle('active', active.searchFilter);
   // Refresh inline highlights for the newly active session's search term.
   if (active.searchTerm && !active.searchFilter) {
-    active.search.findNext(active.searchTerm, {caseSensitive: false, incremental: true});
+    active.search.findNext(active.searchTerm, {caseSensitive: false, incremental: true, decorations: SEARCH_DECO});
   }
   syncBootToggle();
   updatePiiButton();
@@ -1054,7 +1064,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Log search box + "Filter" chip (show only matching lines when active)
   const runSearch = () => {
     const term = active.searchTerm;
-    if (term) active.search.findNext(term, {caseSensitive: false, incremental: true});
+    if (term) active.search.findNext(term, {caseSensitive: false, incremental: true, decorations: SEARCH_DECO});
   };
   logSearchInput.addEventListener('input', () => {
     active.searchTerm = logSearchInput.value;
@@ -1068,19 +1078,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Enter') {
       e.preventDefault();
       if (e.shiftKey) {
-        active.search.findPrevious(active.searchTerm, {caseSensitive: false});
+        active.search.findPrevious(active.searchTerm, {caseSensitive: false, decorations: SEARCH_DECO});
       } else {
-        active.search.findNext(active.searchTerm, {caseSensitive: false});
+        active.search.findNext(active.searchTerm, {caseSensitive: false, decorations: SEARCH_DECO});
       }
     } else if (e.key === 'Escape') {
       logSearchInput.blur();
     }
   });
   document.getElementById('search_prev')!.addEventListener('click', () => {
-    active.search.findPrevious(active.searchTerm, {caseSensitive: false});
+    active.search.findPrevious(active.searchTerm, {caseSensitive: false, decorations: SEARCH_DECO});
   });
   document.getElementById('search_next')!.addEventListener('click', () => {
-    active.search.findNext(active.searchTerm, {caseSensitive: false});
+    active.search.findNext(active.searchTerm, {caseSensitive: false, decorations: SEARCH_DECO});
   });
   searchFilterBtn.addEventListener('click', () => {
     active.searchFilter = !active.searchFilter;
