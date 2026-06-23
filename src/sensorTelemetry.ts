@@ -156,8 +156,7 @@ const DEFAULT_RANGES: Record<string, [number, number]> = {
   voltage: [2, 4.5],
   ch1_voltage: [2, 4.5],
   ch2_voltage: [2, 4.5],
-  channel_utilization: [0, 100],
-  air_util_tx: [0, 100],
+  // air_util_tx / channel_utilization are usually a few % — auto-scale by default
   relative_humidity: [0, 100],
   co2_rh: [0, 100],
   hcho_rh: [0, 100],
@@ -322,7 +321,8 @@ function telLine(series: SensorSeries, opts: ChartOptions): string {
 }
 
 export function renderTelemetryCharts(series: SensorSeries[], opts: ChartOptions): string {
-  let usable = series.filter((s) => s.points.length >= 2);
+  // uptime is a monotonic counter — shown as a clock in the summary, not plotted.
+  let usable = series.filter((s) => s.points.length >= 2 && s.metric.toLowerCase() !== 'uptime');
   if (opts.suppressZero) {
     usable = usable.filter((s) => !isAllZero(s));
   }

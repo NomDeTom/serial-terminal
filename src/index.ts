@@ -82,7 +82,10 @@ let workspaceEl: HTMLElement;
 let dataSuppressZero = false;
 const dataAutoRange = new Set<string>();   // series keys forced to data-driven Y range
 
-let allBootsCb: HTMLInputElement;
+let bootSinceBtn: HTMLButtonElement;
+let bootAllBtn: HTMLButtonElement;
+let autoscrollBtn: HTMLButtonElement;
+let autoscroll = true;
 let piiButton: HTMLButtonElement;
 let fileNameEl: HTMLElement;
 let fileProgressEl: HTMLElement;
@@ -366,7 +369,23 @@ function addLine(s: Session, raw: string, deferRender = false): void {
   }
   if (linePassesFilter(s, clean)) {
     writeAndDecorate(s, clean, ann, entry);
+    if (autoscroll && !deferRender) s.term.scrollToBottom();
   }
+}
+
+// Boot-scope segmented toggle ("Since last boot" vs "All logs").
+function syncBootToggle(): void {
+  if (!bootSinceBtn) return;
+  bootSinceBtn.classList.toggle('active', !active.showAllBoots);
+  bootAllBtn.classList.toggle('active', active.showAllBoots);
+}
+
+function setBootScope(allLogs: boolean): void {
+  active.showAllBoots = allLogs;
+  syncBootToggle();
+  refreshSummary(active);
+  refreshDiagnosis(active);
+  refreshDataPlot(active);
 }
 
 // Caption shown in the summary pane before any data has been parsed.
@@ -471,7 +490,7 @@ function syncChrome(): void {
   document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => {
     b.classList.toggle('active', active.levelFilter.has(b.dataset['level']!));
   });
-  allBootsCb.checked = active.showAllBoots;
+  syncBootToggle();
   updatePiiButton();
 
   summaryEl.innerHTML = '';
@@ -867,7 +886,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   flowControlCheckbox = document.getElementById('rtscts') as HTMLInputElement;
   reconnectCheckbox = document.getElementById('reconnect') as HTMLInputElement;
   grabNextCheckbox = document.getElementById('grab_next') as HTMLInputElement;
-  allBootsCb = document.getElementById('all_boots') as HTMLInputElement;
+  bootSinceBtn = document.getElementById('boot_since') as HTMLButtonElement;
+  bootAllBtn = document.getElementById('boot_all') as HTMLButtonElement;
+  autoscrollBtn = document.getElementById('autoscroll') as HTMLButtonElement;
   piiButton = document.getElementById('pii_toggle') as HTMLButtonElement;
 
   connectButton.addEventListener('click', () => {
@@ -950,12 +971,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // All-boots checkbox
-  allBootsCb.addEventListener('change', () => {
-    active.showAllBoots = allBootsCb.checked;
-    refreshSummary(active);
-    refreshDiagnosis(active);
-    refreshDataPlot(active);
+  // Boot-scope toggle (sidebar): "Since last boot" vs "All logs"
+  bootSinceBtn.addEventListener('click', () => setBootScope(false));
+  bootAllBtn.addEventListener('click', () => setBootScope(true));
+
+  // Autoscroll toggle + jump-to-bottom
+  autoscrollBtn.addEventListener('click', () => {
+    autoscroll = !autoscroll;
+    autoscrollBtn.classList.toggle('btn-active', autoscroll);
+    if (autoscroll) active.term.scrollToBottom();
+  });
+  document.getElementById('jump_bottom')!.addEventListener('click', () => {
+    active.term.scrollToBottom();
   });
 
   // Module all/none toggle

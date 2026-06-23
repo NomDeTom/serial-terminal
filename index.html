@@ -350,7 +350,33 @@
     #info_panel.collapsed { width: 22px; padding: 0; }
     #info_panel.collapsed .panel-edge-left,
     #info_panel.collapsed .info-header,
+    #info_panel.collapsed .boot-toggle,
     #info_panel.collapsed .info-body { display: none; }
+
+    /* Boot-scope segmented toggle at the top of the panel */
+    .boot-toggle {
+      display: flex;
+      gap: 0;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .boot-seg {
+      flex: 1;
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      padding: 4px 8px;
+      transition: all 0.12s;
+    }
+    .boot-seg:first-child { border-radius: 4px 0 0 4px; border-right: none; }
+    .boot-seg:last-child { border-radius: 0 4px 4px 0; }
+    .boot-seg:hover { color: var(--text); }
+    .boot-seg.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
 
     /* Resting caption shown before any data is parsed */
     .summary-resting {
@@ -801,9 +827,8 @@
     <div class="sep"></div>
     <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF <span class="pii-eg">lat=52.944 lon=-1.435</span></button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-      <label id="all_boots_wrap" style="display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11px;cursor:pointer;white-space:nowrap" title="Show accumulated counts across all boots in this log">
-        <input id="all_boots" type="checkbox" style="cursor:pointer;accent-color:var(--green)"> all boots
-      </label>
+      <button id="autoscroll" class="btn btn-active" title="Auto-scroll the log to the newest line">⤓ Autoscroll</button>
+      <button id="jump_bottom" class="btn" title="Jump to the newest line">⮟ Bottom</button>
       <div class="sep"></div>
       <button id="save"  class="btn">⬇ Save</button>
       <button id="clear" class="btn">⬜ Clear</button>
@@ -839,6 +864,10 @@
         <button class="info-tab" data-panel="interest">INTEREST <span class="info-tab-dot" id="interest_dot"></span></button>
         <button class="info-tab" data-panel="data">DATA <span class="info-tab-dot" id="data_dot"></span></button>
         <button class="info-tab" data-panel="diagnosis">DIAG <span class="info-tab-dot" id="diagnosis_dot"></span></button>
+      </div>
+      <div class="boot-toggle" title="Scope of the stats below">
+        <button id="boot_since" class="boot-seg active">Since last boot</button>
+        <button id="boot_all" class="boot-seg">All logs</button>
       </div>
       <div class="info-body">
         <div id="panel_summary" class="info-pane">

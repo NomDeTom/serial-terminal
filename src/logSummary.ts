@@ -1920,10 +1920,18 @@ function fmtBytes(n: number): string {
   return `${n} B`;
 }
 
+// Human "clock" duration — shows the two largest relevant units, surfacing
+// days / weeks / months only once the uptime is long enough to need them.
 function fmtUptime(s: number): string {
-  const h = Math.floor(s / 3600);
+  const mo = Math.floor(s / 2592000);          // 30-day months
+  const w = Math.floor((s % 2592000) / 604800);
+  const d = Math.floor((s % 604800) / 86400);
+  const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
+  if (mo > 0) return `${mo}mo ${w}w`;
+  if (w > 0) return `${w}w ${d}d`;
+  if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${sec}s`;
   return `${sec}s`;
@@ -3038,29 +3046,30 @@ function hopBarChart(base: number[], scaled: number[]): string {
   const cW = W - pL - pR;
   const cH = H - pT - pB;
   const n = base.length;
-  const maxVal = Math.max(1, ...base.map((b, i) => b + (scaled[i] ?? 0)));
-  const barW = cW / n;
-  const gap = Math.max(2, barW * 0.2);
+  // Side-by-side grouped bars, so the y-axis is the per-bar max (not the sum).
+  const maxVal = Math.max(1, ...base, ...scaled);
+  const groupW = cW / n;
+  const gap = Math.max(2, groupW * 0.25);
+  const barW = (groupW - gap) / 2;
   const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal);
 
   for (let i = 0; i < n; i++) {
+    const gx = pL + i * groupW + gap / 2;
     const bv = base[i] ?? 0;
     const sv = scaled[i] ?? 0;
-    const rx = (pL + i * barW + gap / 2).toFixed(1);
-    const rw = (barW - gap).toFixed(1);
     const bH = (bv / maxVal) * cH;
     const sH = (sv / maxVal) * cH;
     if (bH > 0) {
       const ry = (pT + cH - bH).toFixed(1);
-      const bFill = `fill="#67EA94" opacity="0.85" rx="1"`;
-      parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${bH.toFixed(1)}" ${bFill}/>`);
+      parts.push(`<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
+        `height="${bH.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`);
     }
     if (sH > 0) {
-      const ry = (pT + cH - bH - sH).toFixed(1);
-      const sFill = `fill="#a78bfa" opacity="0.75" rx="1"`;
-      parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${sH.toFixed(1)}" ${sFill}/>`);
+      const ry = (pT + cH - sH).toFixed(1);
+      parts.push(`<rect x="${(gx + barW).toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
+        `height="${sH.toFixed(1)}" fill="#a78bfa" opacity="0.75" rx="1"/>`);
     }
-    const lx = (pL + i * barW + barW / 2).toFixed(1);
+    const lx = (gx + barW).toFixed(1);
     const ly = (pT + cH + 14).toFixed(1);
     parts.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">${i}</text>`);
   }
