@@ -14,6 +14,7 @@ import {annotateLine, Annotation} from './annotations';
 import {
   DeviceSummary, emptySummary, updateSummary, updateSummaryCumulative,
   renderSummary, renderHopChart, renderChannelHashChart, renderNodeStatusTile,
+  renderNodeCountChart,
 } from './logSummary';
 import {parseLog as parseSensorLog, toSeries, renderTelemetryCharts} from './sensorTelemetry';
 import {renderDiagnosis} from './diagnosis';
@@ -422,6 +423,7 @@ function refreshDataPlot(s: Session): void {
   if (!dataPlotEl || s !== active) return;
   const sum = s.showAllBoots ? s.cumulative : s.summary;
   const statusHtml = renderNodeStatusTile(sum);
+  const nodeCountHtml = renderNodeCountChart(sum);
   const hopHtml = renderHopChart(sum);
   const chanHtml = renderChannelHashChart(sum);
   // Telemetry parse is O(n) over lineHistory — only run when the panel is open.
@@ -435,7 +437,7 @@ function refreshDataPlot(s: Session): void {
     };
     telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))), opts);
   }
-  const chartsHtml = statusHtml + hopHtml + chanHtml + telHtml;
+  const chartsHtml = statusHtml + nodeCountHtml + hopHtml + chanHtml + telHtml;
   if (!chartsHtml) {
     dataPlotEl.innerHTML = '';
     return;

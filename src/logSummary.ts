@@ -183,6 +183,8 @@ export interface DeviceSummary {
   channelUtil?: string;
   numOnlineNodes?: number;
   numTotalNodes?: number;
+  // Online/total node counts over time (deduped — one point per change)
+  nodeCountHistory: Array<{online: number; total: number}>;
 
   // Packets per channel-hash byte (the "Ch=0xNN" field in printPacket lines).
   // rx = heard over the air ("Lora RX"); tx = transmitted ("Completed sending").
@@ -415,7 +417,17 @@ export function emptySummary(): DeviceSummary {
     keyVerificationFailures: 0, neighborDbFull: 0,
     tracerouteHopLimitExceeded: 0, tracerouteErrors: 0, positionZeroSkipped: 0,
     rxChannelHashCounts: {}, txChannelHashCounts: {},
+    nodeCountHistory: [],
   };
+}
+
+// Append an online/total node-count sample, skipping consecutive duplicates and
+// capping the history so a long session can't grow it without bound.
+function recordNodeCount(s: DeviceSummary, online: number, total: number): void {
+  const last = s.nodeCountHistory[s.nodeCountHistory.length - 1];
+  if (last && last.online === online && last.total === total) return;
+  s.nodeCountHistory.push({online, total});
+  if (s.nodeCountHistory.length > 500) s.nodeCountHistory.shift();
 }
 
 function applyBootLine(line: string, s: DeviceSummary, resetOnBoot: boolean): void {
@@ -845,6 +857,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const m = line.match(/num_online_nodes=(\d+), num_total_nodes=(\d+)/);
     if (m) {
       s.numOnlineNodes = Number(m[1]); s.numTotalNodes = Number(m[2]);
+      recordNodeCount(s, s.numOnlineNodes, s.numTotalNodes);
     }
   },
 
@@ -1906,6 +1919,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (!m) return;
     s.numOnlineNodes = Number(m[1]);
     s.numTotalNodes = Number(m[2]);
+    recordNodeCount(s, s.numOnlineNodes, s.numTotalNodes);
   },
 ];
 
@@ -3050,6 +3064,37 @@ export function renderNodeStatusTile(s: DeviceSummary): string {
   ).join('');
   return `<div class="hc-section"><div class="hc-label">Node status</div>` +
     `<div class="ns-tile">${body}</div></div>`;
+}
+
+// Two overlaid lines (online + total mesh nodes) over the recorded samples.
+// Only rendered when at least two distinct samples exist.
+export function renderNodeCountChart(s: DeviceSummary): string {
+  const hist = s.nodeCountHistory;
+  if (hist.length < 2) return '';
+  const W = 290;
+  const H = 110;
+  const pL = 22; const pB = 22; const pT = 8; const pR = 6;
+  const cW = W - pL - pR;
+  const cH = H - pT - pB;
+  const n = hist.length;
+  const maxVal = Math.max(1, ...hist.map((p) => p.total));
+  const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal);
+
+  const xAt = (i: number): number => pL + (n > 1 ? (i / (n - 1)) * cW : cW / 2);
+  const yAt = (v: number): number => pT + cH - (v / maxVal) * cH;
+  const line = (key: 'online' | 'total', color: string): string => {
+    const pinned = hist.map((p, i) => `${xAt(i).toFixed(1)},${yAt(p[key]).toFixed(1)}`).join(' ');
+    return `<polyline points="${pinned}" fill="none" stroke="${color}" stroke-width="1.5"/>`;
+  };
+  parts.push(line('total', '#a78bfa'));
+  parts.push(line('online', '#67EA94'));
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') + `</svg>`;
+  const legend = `<div class="hc-legend">` +
+    `<span class="hc-dot" style="background:#67EA94"></span>online` +
+    `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>total</div>`;
+  return `<div class="hc-section"><div class="hc-label">Mesh nodes over time</div>${svg}${legend}</div>`;
 }
 
 function svgGridLine(x1: number, x2: number, y: number): string {
