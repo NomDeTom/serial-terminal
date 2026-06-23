@@ -13,7 +13,7 @@ import {parseLine, colorize, preprocessLine} from './logParser';
 import {annotateLine, Annotation} from './annotations';
 import {
   DeviceSummary, emptySummary, updateSummary, updateSummaryCumulative,
-  renderSummary, renderHopChart,
+  renderSummary, renderHopChart, renderChannelHashChart,
 } from './logSummary';
 import {parseLog as parseSensorLog, toSeries, renderTelemetryCharts} from './sensorTelemetry';
 import {renderDiagnosis} from './diagnosis';
@@ -396,12 +396,13 @@ function refreshDataPlot(s: Session): void {
   if (!dataPlotEl || s !== active) return;
   const sum = s.showAllBoots ? s.cumulative : s.summary;
   const hopHtml = renderHopChart(sum);
+  const chanHtml = renderChannelHashChart(sum);
   // Telemetry parse is O(n) over lineHistory — only run when the panel is open.
   let telHtml = '';
   if (panelDataEl && !panelDataEl.hidden) {
     telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))));
   }
-  const html = hopHtml + telHtml;
+  const html = hopHtml + chanHtml + telHtml;
   if (html) {
     dataPlotEl.innerHTML = html;
     dataDotEl?.classList.add('visible');

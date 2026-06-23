@@ -183,6 +183,11 @@ export interface DeviceSummary {
   numOnlineNodes?: number;
   numTotalNodes?: number;
 
+  // Packets per channel-hash byte (the "Ch=0xNN" field in printPacket lines).
+  // rx = heard over the air ("Lora RX"); tx = transmitted ("Completed sending").
+  rxChannelHashCounts: Record<string, number>;
+  txChannelHashCounts: Record<string, number>;
+
   // Hop scaling
   hopLimit?: number;
   hopFill?: string;
@@ -408,6 +413,7 @@ export function emptySummary(): DeviceSummary {
     unsignedNodeInfoDropped: 0, nodeKeyDowngrade: [],
     keyVerificationFailures: 0, neighborDbFull: 0,
     tracerouteHopLimitExceeded: 0, tracerouteErrors: 0, positionZeroSkipped: 0,
+    rxChannelHashCounts: {}, txChannelHashCounts: {},
   };
 }
 
@@ -1868,6 +1874,28 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
       s.femLnaUnsupported = true;
     }
   },
+
+  // #202 Packet heard over the air — count per channel-hash byte.
+  // Source: printPacket() (RadioInterface.cpp) emits "Lora RX (… Ch=0x%x …)"
+  // for every received packet (RadioLibInterface.cpp:615). `Ch` is the
+  // single-byte channel hash, so this tallies RX traffic volume per channel.
+  (line, s) => {
+    const m = line.match(/Lora RX \(.*\bCh=(0x[\da-fA-F]+)/);
+    if (!m) return;
+    const hash = m[1].toLowerCase();
+    s.rxChannelHashCounts[hash] = (s.rxChannelHashCounts[hash] ?? 0) + 1;
+  },
+
+  // #203 Packet transmitted — count per channel-hash byte.
+  // Source: printPacket() emits "Completed sending (… Ch=0x%x …)" once per
+  // sent packet on both hardware (RadioLibInterface.cpp:524) and native
+  // (SimRadio.cpp:98). Symmetric counterpart to #202's RX tally.
+  (line, s) => {
+    const m = line.match(/Completed sending \(.*\bCh=(0x[\da-fA-F]+)/);
+    if (!m) return;
+    const hash = m[1].toLowerCase();
+    s.txChannelHashCounts[hash] = (s.txChannelHashCounts[hash] ?? 0) + 1;
+  },
 ];
 
 export function updateSummary(line: string, summary: DeviceSummary): void {
@@ -2915,6 +2943,56 @@ export function renderHopChart(s: DeviceSummary): string {
   if (hasBar) parts.push(hopBarChart(s.hopPerHop!, s.hopScaledPerHop!));
   if (hasLine) parts.push(hopLineChart(s.hopSeenPerHour!));
   return parts.join('');
+}
+
+// Grouped bar chart of packets per channel-hash byte: rx (heard) vs tx (sent).
+export function renderChannelHashChart(s: DeviceSummary): string {
+  const hashes = [...new Set([
+    ...Object.keys(s.rxChannelHashCounts),
+    ...Object.keys(s.txChannelHashCounts),
+  ])].sort((a, b) => Number(a) - Number(b));
+  if (hashes.length === 0) return '';
+
+  const W = 290;
+  const H = 110;
+  const pL = 22; const pB = 22; const pT = 8; const pR = 6;
+  const cW = W - pL - pR;
+  const cH = H - pT - pB;
+  const n = hashes.length;
+  const rx = hashes.map((h) => s.rxChannelHashCounts[h] ?? 0);
+  const tx = hashes.map((h) => s.txChannelHashCounts[h] ?? 0);
+  const maxVal = Math.max(1, ...rx, ...tx);
+  const groupW = cW / n;
+  const gap = Math.max(2, groupW * 0.25);
+  const barW = (groupW - gap) / 2;
+  const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal);
+
+  for (let i = 0; i < n; i++) {
+    const gx = pL + i * groupW + gap / 2;
+    const rH = (rx[i] / maxVal) * cH;
+    const tH = (tx[i] / maxVal) * cH;
+    if (rH > 0) {
+      const ry = (pT + cH - rH).toFixed(1);
+      parts.push(`<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
+        `height="${rH.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`);
+    }
+    if (tH > 0) {
+      const ty = (pT + cH - tH).toFixed(1);
+      parts.push(`<rect x="${(gx + barW).toFixed(1)}" y="${ty}" width="${barW.toFixed(1)}" ` +
+        `height="${tH.toFixed(1)}" fill="#a78bfa" opacity="0.75" rx="1"/>`);
+    }
+    const lx = (gx + barW).toFixed(1);
+    const ly = (pT + cH + 14).toFixed(1);
+    parts.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">` +
+      `${hashes[i]}</text>`);
+  }
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') + `</svg>`;
+  const legend = `<div class="hc-legend">` +
+    `<span class="hc-dot" style="background:#67EA94"></span>heard` +
+    `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>sent</div>`;
+  return `<div class="hc-section"><div class="hc-label">Packets per channel hash</div>${svg}${legend}</div>`;
 }
 
 function svgGridLine(x1: number, x2: number, y: number): string {
