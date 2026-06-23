@@ -516,7 +516,6 @@ function switchView(kind: 'serial' | 'file'): void {
     const advBtn = document.getElementById('advanced_toggle');
     if (advBtn) advBtn.textContent = 'Advanced ▾';
   }
-  statusDot.hidden = kind !== 'serial';
 
   document.querySelectorAll<HTMLButtonElement>('.view-tab').forEach((b) => {
     b.classList.toggle('active', b.dataset['view'] === kind);
