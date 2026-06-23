@@ -47,6 +47,7 @@
     /* View tabs (Live Serial / File) + control groups */
     .ctrl-group { display: flex; align-items: center; gap: 8px; }
     .ctrl-group[hidden] { display: none; }
+    #serial_controls { flex: 1; }
     .view-tab {
       background: none;
       border: 1px solid transparent;
@@ -61,6 +62,56 @@
     }
     .view-tab:hover { color: var(--text); }
     .view-tab.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+    .view-tab-big {
+      font-size: 15px;
+      font-weight: 700;
+      padding: 8px 20px;
+      border-radius: 7px;
+      border-width: 1px;
+    }
+
+    /* ── Row 2: mode bar (serial / file controls) ── */
+    .mode-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .api-toggle {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .api-label { letter-spacing: 0.02em; }
+    #api_current { color: var(--green); font-weight: 700; }
+    #polyfill_switcher { font-size: 11px; text-decoration: none; padding: 3px 8px; }
+
+    /* File load progress */
+    .file-progress { display: flex; align-items: center; gap: 6px; }
+    .file-progress[hidden] { display: none; }
+    .file-progress-bar {
+      width: 120px;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #file_progress_fill {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--green);
+      transition: width 0.1s linear;
+    }
+    #file_progress_pct { font-size: 11px; color: var(--muted); min-width: 30px; }
 
     /* Status dot */
     #statusDot {
@@ -635,23 +686,48 @@
 </head>
 <body>
 
-  <!-- ── Main toolbar ── -->
+  <!-- ── Row 1: title + view switch ── -->
   <div class="toolbar">
     <div id="statusDot"></div>
     <span class="title">Meshtastic</span>
     <span class="title-sub">Log Analyser</span>
     <div class="sep"></div>
-    <button class="view-tab active" data-view="serial">● Live Serial</button>
-    <button class="view-tab" data-view="file">📄 File</button>
-    <div class="sep"></div>
+    <button class="view-tab view-tab-big active" data-view="serial">● Live Serial</button>
+    <button class="view-tab view-tab-big" data-view="file">📄 File</button>
+  </div>
+
+  <!-- ── Row 2: mode controls (swaps with the view) ── -->
+  <div class="mode-bar">
     <span id="serial_controls" class="ctrl-group">
       <label for="ports">Port</label>
       <select id="ports">
         <option value="prompt">— select port —</option>
       </select>
       <button id="connect" class="btn">Connect</button>
+      <button id="advanced_toggle" class="btn" style="font-size:11px">Advanced ▾</button>
       <div class="sep"></div>
-      <label for="baudrate">Baud</label>
+      <label><input id="reconnect" type="checkbox" checked> Reconnect</label>
+      <label><input id="grab_next" type="checkbox"> Grab next</label>
+      <span class="api-toggle">
+        <span class="api-label">Web Serial API:</span>
+        <strong id="api_current">Native</strong>
+        <a id="polyfill_switcher" class="btn"></a>
+      </span>
+    </span>
+    <span id="file_controls" class="ctrl-group" hidden>
+      <button id="load_file_btn" class="btn">📂 Load file…</button>
+      <span id="file_name" class="title-sub"></span>
+      <span id="file_progress" class="file-progress" hidden>
+        <span class="file-progress-bar"><span id="file_progress_fill"></span></span>
+        <span id="file_progress_pct">0%</span>
+      </span>
+      <input id="file_input" type="file" hidden>
+    </span>
+  </div>
+
+  <!-- ── Row 3: advanced serial settings (revealed by Advanced) ── -->
+  <div id="advanced" hidden>
+    <label for="baudrate">Baud
       <select id="baudrate">
         <option value="9600">9600</option>
         <option value="19200">19200</option>
@@ -663,21 +739,8 @@
         <option value="921600">921600</option>
         <option value="custom">Custom…</option>
       </select>
-      <input id="custom_baudrate" type="number" min="1" placeholder="baud…" hidden style="width:90px">
-      <button id="advanced_toggle" class="btn" style="font-size:11px">Advanced ▾</button>
-    </span>
-    <span id="file_controls" class="ctrl-group" hidden>
-      <button id="load_file_btn" class="btn">📂 Load file…</button>
-      <span id="file_name" class="title-sub"></span>
-      <input id="file_input" type="file" hidden>
-    </span>
-    <div class="toolbar-right">
-      <a id="polyfill_switcher"></a>
-    </div>
-  </div>
-
-  <!-- ── Advanced serial settings (hidden by default) ── -->
-  <div id="advanced" hidden>
+    </label>
+    <input id="custom_baudrate" type="number" min="1" placeholder="baud…" hidden style="width:90px">
     <label for="databits">Data bits
       <select id="databits">
         <option value="7">7</option>
@@ -698,8 +761,6 @@
       </select>
     </label>
     <label><input id="rtscts" type="checkbox"> HW flow control</label>
-    <label><input id="reconnect" type="checkbox" checked> Reconnect to device</label>
-    <label><input id="grab_next" type="checkbox"> Grab next available</label>
   </div>
 
   <!-- ── Port history bar (auto-shown when ports are seen) ── -->

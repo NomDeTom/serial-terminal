@@ -86,6 +86,9 @@ const dataAutoRange = new Set<string>();   // series keys forced to data-driven 
 let allBootsCb: HTMLInputElement;
 let piiButton: HTMLButtonElement;
 let fileNameEl: HTMLElement;
+let fileProgressEl: HTMLElement;
+let fileProgressFillEl: HTMLElement;
+let fileProgressPctEl: HTMLElement;
 
 interface PortRecord { label: string; status: 'available' | 'gone'; }
 const portHistory = new Map<SerialPort | SerialPortPolyfill, PortRecord>();
@@ -342,7 +345,9 @@ function switchInfoTab(panel: 'summary' | 'data' | 'diagnosis' | 'interest'): vo
 
 // ── Data pipeline ─────────────────────────────────────────────────────────────
 
-function addLine(s: Session, raw: string): void {
+// When deferRender is true the panel refreshes are skipped (caller refreshes
+// once at the end) — used by bulk file loading so it isn't O(lines × render).
+function addLine(s: Session, raw: string, deferRender = false): void {
   const clean = preprocessLine(raw);
   if (s.lineHistory.length >= MAX_HISTORY) {
     const removed = s.lineHistory.shift();
@@ -358,9 +363,11 @@ function addLine(s: Session, raw: string): void {
   s.lineHistory.push(clean);
   updateSummary(clean, s.summary);
   updateSummaryCumulative(clean, s.cumulative);
-  refreshSummary(s);
-  refreshDiagnosis(s);
-  refreshDataPlot(s);
+  if (!deferRender) {
+    refreshSummary(s);
+    refreshDiagnosis(s);
+    refreshDataPlot(s);
+  }
   const key = moduleKey(parseLine(clean).module);
   if (!s.seenModules.has(key)) {
     s.seenModules.add(key);
@@ -372,7 +379,7 @@ function addLine(s: Session, raw: string): void {
     entry = {seq: s.interestSeq++, ann, snippet: clean};
     s.interest.push(entry);
     s.interestBySeq.set(entry.seq, entry);
-    refreshInterest(s);
+    if (!deferRender) refreshInterest(s);
   }
   if (linePassesFilter(s, clean)) {
     writeAndDecorate(s, clean, ann, entry);
@@ -502,6 +509,13 @@ function switchView(kind: 'serial' | 'file'): void {
   document.getElementById('serial_controls')!.hidden = kind !== 'serial';
   document.getElementById('file_controls')!.hidden = kind !== 'file';
   document.getElementById('port_bar')!.hidden = kind !== 'serial' || portHistory.size === 0;
+  // Advanced serial settings only make sense on the serial tab — collapse on file.
+  if (kind !== 'serial') {
+    const adv = document.getElementById('advanced')!;
+    adv.hidden = true;
+    const advBtn = document.getElementById('advanced_toggle');
+    if (advBtn) advBtn.textContent = 'Advanced ▾';
+  }
   statusDot.hidden = kind !== 'serial';
 
   document.querySelectorAll<HTMLButtonElement>('.view-tab').forEach((b) => {
@@ -514,18 +528,42 @@ function switchView(kind: 'serial' | 'file'): void {
 
 // ── File loading ───────────────────────────────────────────────────────────────
 
+function setFileProgress(frac: number): void {
+  if (!fileProgressEl) return;
+  fileProgressEl.hidden = false;
+  const pct = Math.round(frac * 100);
+  fileProgressFillEl.style.width = `${pct}%`;
+  fileProgressPctEl.textContent = `${pct}%`;
+}
+
 async function loadFileInto(file: File): Promise<void> {
   switchView('file');
   clearLog();
   fileNameEl.textContent = file.name;
+  setFileProgress(0);
   const text = await file.text();
+  const lines = text.split(/\r?\n/);
+  const total = lines.length;
+  const CHUNK = 2000;
   try {
-    for (const line of text.split(/\r?\n/)) {
-      if (line) addLine(fileSession, line);
+    for (let i = 0; i < total; i += CHUNK) {
+      const end = Math.min(i + CHUNK, total);
+      for (let j = i; j < end; j++) {
+        if (lines[j]) addLine(fileSession, lines[j], true);
+      }
+      setFileProgress(end / total);
+      // Yield so the browser can paint the progress bar between chunks.
+      await new Promise((r) => requestAnimationFrame(r));
     }
+    // Bulk load deferred per-line rendering — refresh the panels once now.
+    refreshSummary(fileSession);
+    refreshDiagnosis(fileSession);
+    refreshDataPlot(fileSession);
+    refreshInterest(fileSession);
   } catch (err) {
     console.error('loadFileInto: error during line processing:', err);
   }
+  if (fileProgressEl) fileProgressEl.hidden = true;
   active.fit.fit();
   active.term.scrollToBottom();
 }
@@ -813,6 +851,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   portChipsEl = document.getElementById('port_chips')!;
   statusDot = document.getElementById('statusDot')!;
   fileNameEl = document.getElementById('file_name')!;
+  fileProgressEl = document.getElementById('file_progress')!;
+  fileProgressFillEl = document.getElementById('file_progress_fill')!;
+  fileProgressPctEl = document.getElementById('file_progress_pct')!;
   portSelector = document.getElementById('ports') as HTMLSelectElement;
   connectButton = document.getElementById('connect') as HTMLButtonElement;
   baudRateSelector = document.getElementById('baudrate') as HTMLSelectElement;
@@ -951,14 +992,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('save')!.addEventListener('click', saveLog);
   document.getElementById('clear')!.addEventListener('click', clearLog);
 
-  // Polyfill switcher
+  // Web Serial API mode indicator + switcher
   const polyfillSwitcher = document.getElementById('polyfill_switcher') as HTMLAnchorElement;
+  const apiCurrent = document.getElementById('api_current')!;
   if (usePolyfill) {
+    apiCurrent.textContent = 'Polyfill';
     polyfillSwitcher.href = './';
-    polyfillSwitcher.textContent = '→ Native API';
+    polyfillSwitcher.textContent = 'Switch to Native';
   } else {
+    apiCurrent.textContent = 'Native';
     polyfillSwitcher.href = './?polyfill';
-    polyfillSwitcher.textContent = '→ Polyfill';
+    polyfillSwitcher.textContent = 'Switch to Polyfill';
   }
 
   initDragDrop();

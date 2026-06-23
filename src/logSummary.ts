@@ -1,5 +1,6 @@
 import {lookupDevice, lookupDeviceByModel} from './deviceInfo';
 import {lookupReleaseDate} from './firmwareReleases';
+import {publicChannelHint} from './channelHashNames';
 
 // Routing.Error enum from meshtastic/protobufs mesh.proto
 const NAK_ERROR_NAMES: Record<number, string> = {
@@ -2946,6 +2947,10 @@ export function renderHopChart(s: DeviceSummary): string {
 }
 
 // Grouped bar chart of packets per channel-hash byte: rx (heard) vs tx (sent).
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export function renderChannelHashChart(s: DeviceSummary): string {
   const hashes = [...new Set([
     ...Object.keys(s.rxChannelHashCounts),
@@ -2971,20 +2976,28 @@ export function renderChannelHashChart(s: DeviceSummary): string {
     const gx = pL + i * groupW + gap / 2;
     const rH = (rx[i] / maxVal) * cH;
     const tH = (tx[i] / maxVal) * cH;
+    const g: string[] = [];
+    // Transparent full-column hit area so the hover tooltip covers the whole group.
+    g.push(`<rect x="${(pL + i * groupW).toFixed(1)}" y="${pT}" ` +
+      `width="${groupW.toFixed(1)}" height="${cH}" fill="transparent"/>`);
     if (rH > 0) {
       const ry = (pT + cH - rH).toFixed(1);
-      parts.push(`<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
+      g.push(`<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
         `height="${rH.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`);
     }
     if (tH > 0) {
       const ty = (pT + cH - tH).toFixed(1);
-      parts.push(`<rect x="${(gx + barW).toFixed(1)}" y="${ty}" width="${barW.toFixed(1)}" ` +
+      g.push(`<rect x="${(gx + barW).toFixed(1)}" y="${ty}" width="${barW.toFixed(1)}" ` +
         `height="${tH.toFixed(1)}" fill="#a78bfa" opacity="0.75" rx="1"/>`);
     }
     const lx = (gx + barW).toFixed(1);
     const ly = (pT + cH + 14).toFixed(1);
-    parts.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">` +
+    g.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">` +
       `${hashes[i]}</text>`);
+    const hint = publicChannelHint(Number(hashes[i]));
+    const title = `Ch ${hashes[i]} — heard ${rx[i]}, sent ${tx[i]}` +
+      (hint ? `\nPossible public channels:\n${hint}` : '\n(no known public preset)');
+    parts.push(`<g><title>${xmlEscape(title)}</title>${g.join('')}</g>`);
   }
 
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
