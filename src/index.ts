@@ -77,7 +77,6 @@ let panelDataEl: HTMLElement;
 let panelDiagnosisEl: HTMLElement;
 let panelInterestEl: HTMLElement;
 let workspaceEl: HTMLElement;
-let infoPanelVisible = false;
 
 // Data-panel chart controls (shared across sessions, re-applied on each render)
 let dataSuppressZero = false;
@@ -269,7 +268,6 @@ function refreshInterest(s: Session): void {
     interestEl.innerHTML = '<div class="int-empty">No lines of interest yet.</div>';
     return;
   }
-  showInfoPanel();
   const faults = s.interest.filter((e) => e.ann.severity !== 'info');
   const infos = s.interest.filter((e) => e.ann.severity === 'info');
   const parts: string[] = [];
@@ -307,7 +305,6 @@ function revealLine(s: Session, entry: InterestEntry): void {
 // Gutter marker → Interest tab: open the tab and pulse the matching row.
 function openInterestEntry(entry: InterestEntry): void {
   switchInfoTab('interest');
-  showInfoPanel();
   const row = interestEl?.querySelector<HTMLElement>(`.int-row[data-seq="${entry.seq}"]`);
   if (row) {
     row.scrollIntoView({block: 'nearest'});
@@ -318,20 +315,6 @@ function openInterestEntry(entry: InterestEntry): void {
 }
 
 // ── Info panel management ─────────────────────────────────────────────────────
-
-function showInfoPanel(): void {
-  if (!infoPanelEl || infoPanelVisible) return;
-  infoPanelEl.hidden = false;
-  infoPanelVisible = true;
-  active.fit.fit();
-}
-
-function hideInfoPanel(): void {
-  if (!infoPanelEl || !infoPanelVisible) return;
-  infoPanelEl.hidden = true;
-  infoPanelVisible = false;
-  active.fit.fit();
-}
 
 function switchInfoTab(panel: 'summary' | 'data' | 'diagnosis' | 'interest'): void {
   panelSummaryEl.hidden = panel !== 'summary';
@@ -386,13 +369,18 @@ function addLine(s: Session, raw: string, deferRender = false): void {
   }
 }
 
+// Caption shown in the summary pane before any data has been parsed.
+function restingCaption(): string {
+  const msg = active.kind === 'file' ?
+    'Upload a log file to begin' :
+    'Select a port to begin';
+  return `<div class="summary-resting">${msg}</div>`;
+}
+
 function refreshSummary(s: Session): void {
   if (!summaryEl || s !== active) return;
   const html = renderSummary(s.showAllBoots ? s.cumulative : s.summary);
-  if (html) {
-    summaryEl.innerHTML = html;
-    showInfoPanel();
-  }
+  summaryEl.innerHTML = html || restingCaption();
 }
 
 function refreshDiagnosis(s: Session): void {
@@ -401,7 +389,6 @@ function refreshDiagnosis(s: Session): void {
   diagnosisEl.innerHTML = html;
   const hasAlerts = html.includes('diag-crit') || html.includes('diag-warn');
   diagnosisDotEl?.classList.toggle('visible', hasAlerts);
-  if (hasAlerts) showInfoPanel();
 }
 
 function renderDataControls(): string {
@@ -433,7 +420,6 @@ function refreshDataPlot(s: Session): void {
   }
   dataPlotEl.innerHTML = renderDataControls() + `<div class="dp-charts">${chartsHtml}</div>`;
   dataDotEl?.classList.add('visible');
-  showInfoPanel();
 }
 
 function resetFilters(s: Session): void {
@@ -708,8 +694,8 @@ function clearLog(): void {
   dataDotEl.classList.remove('visible');
   diagnosisDotEl.classList.remove('visible');
   interestDotEl.classList.remove('visible');
-  hideInfoPanel();
   switchInfoTab('summary');
+  refreshSummary(s);   // restore the resting caption (panel stays visible)
 }
 
 function getSelectedBaudRate(): number {
@@ -926,14 +912,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Analysis mode: clicking the left-edge strip expands/collapses the panel
-  const panelEdge = document.getElementById('panel_edge')!;
+  // Left edge: expand/collapse the analysis view
+  const panelEdgeLeft = document.getElementById('panel_edge_left')!;
   const edgeArrow = document.getElementById('panel_edge_arrow')!;
-  panelEdge.addEventListener('click', () => {
+  panelEdgeLeft.addEventListener('click', () => {
+    if (infoPanelEl.classList.contains('collapsed')) return;
     const on = workspaceEl.classList.toggle('analysis');
     edgeArrow.textContent = on ? '⟩' : '⟨';
-    panelEdge.title = on ? 'Click to collapse' : 'Click to expand';
+    panelEdgeLeft.title = on ? 'Collapse analysis view' : 'Expand analysis view';
     refreshDataPlot(active);   // regenerate charts at the new (large/small) size
+    active.fit.fit();
+  });
+
+  // Right edge: hide/show (collapse to just this strip, which reopens on click)
+  const panelEdgeRight = document.getElementById('panel_edge_right')!;
+  const rightArrow = document.getElementById('panel_edge_right_arrow')!;
+  panelEdgeRight.addEventListener('click', () => {
+    const collapsed = infoPanelEl.classList.toggle('collapsed');
+    if (collapsed) workspaceEl.classList.remove('analysis');  // not meaningful when hidden
+    rightArrow.textContent = collapsed ? '«' : '»';
+    panelEdgeRight.title = collapsed ? 'Show panel' : 'Hide panel';
     active.fit.fit();
   });
 
@@ -950,12 +948,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       else dataAutoRange.delete(key);
       refreshDataPlot(active);
     }
-  });
-
-  // Info panel close (✕ on the edge strip — don't also fire the edge toggle)
-  document.getElementById('info_close')!.addEventListener('click', (e) => {
-    e.stopPropagation();
-    hideInfoPanel();
   });
 
   // All-boots checkbox
