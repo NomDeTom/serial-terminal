@@ -426,6 +426,7 @@
     .info-body {
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;   /* charts scale to fit; never scroll sideways */
       min-height: 0;
     }
     .info-pane { padding: 10px 12px; }
@@ -623,6 +624,9 @@
       align-items: flex-start;
       flex-wrap: wrap;
     }
+    /* Charts scale down to the pane width so the panel never scrolls sideways */
+    .dp-charts .hc-section { max-width: 100%; min-width: 0; }
+    .dp-charts .hc-section svg { max-width: 100%; height: auto; }
     .hc-head {
       display: flex;
       align-items: center;
