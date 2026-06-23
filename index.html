@@ -302,6 +302,19 @@
     }
     .info-tab-dot.visible { opacity: 1; }
     #all_boots_wrap:hover { color: var(--text); }
+    #analysis_toggle {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      padding: 2px 5px;
+      margin-left: auto;
+      border-radius: 3px;
+    }
+    #analysis_toggle:hover { color: var(--text); }
+    #analysis_toggle.btn-active { color: var(--green); border-color: var(--green); background: var(--green-bg); }
     #info_close {
       background: none;
       border: none;
@@ -309,7 +322,7 @@
       cursor: pointer;
       font-size: 12px;
       padding: 2px 4px;
-      margin-left: auto;
+      margin-left: 2px;
       border-radius: 3px;
     }
     #info_close:hover { color: var(--text); }
@@ -491,12 +504,65 @@
     .sum-divider-err { color: #f87171; border-color: rgba(239,68,68,0.3); }
 
     /* ── Data plot content ── */
-    #dataPlotContent {
+    #dataPlotContent { display: block; }
+    .dp-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .dp-controls label {
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      gap: 4px;
+    }
+    .dp-controls input { cursor: pointer; accent-color: var(--green); }
+    .dp-charts {
       display: flex;
       gap: 16px;
       align-items: flex-start;
       flex-wrap: wrap;
     }
+    .hc-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .hc-range {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 9px;
+      font-weight: 400;
+      letter-spacing: 0;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .hc-range input { cursor: pointer; accent-color: var(--green); width: 11px; height: 11px; }
+
+    /* Analysis mode: expand the info panel, shrink the serial log, tile the data.
+       Gated on the panel actually being visible so closing it frees the terminal. */
+    .workspace.analysis:has(#info_panel:not([hidden])) .term-wrap { flex: 0 0 340px; }
+    .workspace.analysis:has(#info_panel:not([hidden])) #info_panel { flex: 1; width: auto; }
+    .workspace.analysis .dp-charts {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 14px;
+      align-items: start;
+    }
+    .workspace.analysis .dp-charts .dp-divider { grid-column: 1 / -1; }
+    .workspace.analysis .dp-charts .hc-section {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .workspace.analysis .dp-charts .hc-section svg { width: 100%; height: auto; }
 
     /* ── Diagnosis panel ── */
     #diagnosisContent { display: flex; flex-direction: column; gap: 0; }
@@ -691,6 +757,7 @@
         <button class="info-tab" data-panel="interest">INTEREST <span class="info-tab-dot" id="interest_dot"></span></button>
         <button class="info-tab" data-panel="data">DATA <span class="info-tab-dot" id="data_dot"></span></button>
         <button class="info-tab" data-panel="diagnosis">DIAG <span class="info-tab-dot" id="diagnosis_dot"></span></button>
+        <button id="analysis_toggle" title="Expand analysis view">⤢</button>
         <button id="info_close" title="Close panel">✕</button>
       </div>
       <div class="info-body">

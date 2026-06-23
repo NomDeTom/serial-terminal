@@ -149,6 +149,56 @@ const CAT_COLOR: Record<string, string> = {
 };
 const CAT_ORDER = ['device', 'environment', 'airQuality', 'power', 'health', 'host'];
 
+// Sensible fixed Y-axis ranges per telemetry metric, applied unless the user
+// ticks "auto" on that chart. Keyed by the normalized metric name.
+const DEFAULT_RANGES: Record<string, [number, number]> = {
+  battery_level: [0, 100],
+  voltage: [2, 4.5],
+  ch1_voltage: [2, 4.5],
+  ch2_voltage: [2, 4.5],
+  channel_utilization: [0, 100],
+  air_util_tx: [0, 100],
+  relative_humidity: [0, 100],
+  co2_rh: [0, 100],
+  hcho_rh: [0, 100],
+  soil_moisture: [0, 100],
+  spo2: [0, 100],
+  temperature: [-10, 50],
+  co2_t: [-10, 50],
+  hcho_t: [-10, 50],
+  soil_temperature: [-10, 50],
+  co2: [400, 2000],
+  iaq: [0, 500],
+  heart_bpm: [40, 180],
+};
+
+// Returns the fixed default [min, max] for a metric, or null if none is known
+// (in which case the chart always auto-ranges).
+function defaultRange(metric: string): [number, number] | null {
+  const k = metric.trim().toLowerCase().replace(/\s+/g, '_');
+  if (DEFAULT_RANGES[k]) return DEFAULT_RANGES[k];
+  if (/^pm(10|25|100)/.test(k)) return [0, 150];
+  return null;
+}
+
+export interface ChartOptions {
+  suppressZero: boolean;
+  autoRange: Set<string>;   // series keys the user has forced to data-driven range
+  large: boolean;           // analysis mode — render bigger, squarer chart tiles
+}
+
+export function seriesKey(s: SensorSeries): string {
+  return `${s.source}|${s.category}|${s.metric}`;
+}
+
+function isAllZero(s: SensorSeries): boolean {
+  return s.points.every((p) => p.value === 0);
+}
+
+function escapeAttr(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
 function fmtU(secs: number): string {
   if (secs >= 3600) return `${Math.round(secs / 3600)}h`;
   if (secs >= 60) return `${Math.round(secs / 60)}m`;
@@ -163,33 +213,50 @@ function fmtV(v: number): string {
   return v.toPrecision(2);
 }
 
-function telLine(series: SensorSeries): string {
+function telLine(series: SensorSeries, opts: ChartOptions): string {
   const pts = series.points;
   if (pts.length < 2) return '';
-  const W = 290;
-  const H = 90;
+  const W = opts.large ? 300 : 290;
+  const H = opts.large ? 200 : 90;
   const pL = 28; const pB = 18; const pT = 5; const pR = 6;
   const cW = W - pL - pR;
   const cH = H - pT - pB;
   const color = CAT_COLOR[series.category] ?? '#6b7280';
+  const key = seriesKey(series);
 
   let xMin = Infinity; let xMax = -Infinity;
-  let yMin = Infinity; let yMax = -Infinity;
+  let dMin = Infinity; let dMax = -Infinity;
   for (const p of pts) {
     if (p.uptime < xMin) xMin = p.uptime;
     if (p.uptime > xMax) xMax = p.uptime;
-    if (p.value < yMin) yMin = p.value;
-    if (p.value > yMax) yMax = p.value;
+    if (p.value < dMin) dMin = p.value;
+    if (p.value > dMax) dMax = p.value;
   }
   if (xMin === xMax) xMax = xMin + 1;
-  if (yMin === yMax) {
-    yMin -= 1;
-    yMax += 1;
+
+  // Y range: use the fixed default unless the user forced auto-range, or there
+  // is no sensible default for this metric.
+  const def = defaultRange(series.metric);
+  const useAuto = opts.autoRange.has(key) || !def;
+  let yMin: number; let yMax: number;
+  if (useAuto) {
+    yMin = dMin; yMax = dMax;
+    if (yMin === yMax) {
+      yMin -= 1;
+      yMax += 1;
+    }
+  } else {
+    yMin = def![0]; yMax = def![1];
   }
   const xR = xMax - xMin;
   const yR = yMax - yMin;
-  const X = (u: number) => pL + ((u - xMin) / xR) * cW;
-  const Y = (v: number) => pT + cH - ((v - yMin) / yR) * cH;
+  const X = (u: number): number => pL + ((u - xMin) / xR) * cW;
+  // Clamp to the plot area so out-of-range points (when a fixed range is used)
+  // sit on the boundary instead of overflowing the tile.
+  const Y = (v: number): number => {
+    const y = pT + cH - ((v - yMin) / yR) * cH;
+    return Math.max(pT, Math.min(pT + cH, y));
+  };
 
   const out: string[] = [];
 
@@ -244,17 +311,28 @@ function telLine(series: SensorSeries): string {
     `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
     out.join('') + '</svg>';
   const label = series.metric + (series.unit ? ` (${series.unit})` : '');
-  return `<div class="hc-section"><div class="hc-label">${label}</div>${svg}</div>`;
+  // The auto-range toggle is only meaningful when a fixed default exists.
+  const toggle = def ?
+    `<label class="hc-range"><input type="checkbox" class="dp-autorange" ` +
+      `data-key="${escapeAttr(key)}"${useAuto ? ' checked' : ''}>auto</label>` :
+    '';
+  return `<div class="hc-section" data-key="${escapeAttr(key)}">` +
+    `<div class="hc-head"><span class="hc-label">${label}</span>${toggle}</div>` +
+    `${svg}</div>`;
 }
 
-export function renderTelemetryCharts(series: SensorSeries[]): string {
-  const usable = series.filter((s) => s.points.length >= 2);
+export function renderTelemetryCharts(series: SensorSeries[], opts: ChartOptions): string {
+  let usable = series.filter((s) => s.points.length >= 2);
+  if (opts.suppressZero) {
+    usable = usable.filter((s) => !isAllZero(s));
+  }
   if (usable.length === 0) return '';
 
   const local = usable.filter((s) => s.source === 'local');
   const peers = usable.filter((s) => s.source !== 'local');
   const parts: string[] = [];
-  const divHdr = 'class="hc-label" style="margin-top:8px;border-top:1px solid #374151;padding-top:6px;"';
+  const divHdr =
+    'class="hc-label dp-divider" style="margin-top:8px;border-top:1px solid #374151;padding-top:6px;"';
 
   if (local.length > 0) {
     const sorted = [...local].sort((a, b) => {
@@ -264,7 +342,7 @@ export function renderTelemetryCharts(series: SensorSeries[]): string {
     });
     parts.push(`<div ${divHdr}>LOCAL TELEMETRY</div>`);
     for (const s of sorted) {
-      const chart = telLine(s);
+      const chart = telLine(s, opts);
       if (chart) parts.push(chart);
     }
   }
@@ -277,9 +355,9 @@ export function renderTelemetryCharts(series: SensorSeries[]): string {
       bySender.get(s.source)!.push(s);
     }
     for (const [sender, ss] of bySender) {
-      parts.push(`<div class="hc-label" style="color:#f3f4f6;font-size:9px;">${sender}</div>`);
+      parts.push(`<div class="hc-label dp-divider" style="color:#f3f4f6;font-size:9px;">${sender}</div>`);
       for (const s of ss) {
-        const chart = telLine(s);
+        const chart = telLine(s, opts);
         if (chart) parts.push(chart);
       }
     }

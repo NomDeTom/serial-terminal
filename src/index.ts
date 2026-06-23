@@ -76,7 +76,12 @@ let panelSummaryEl: HTMLElement;
 let panelDataEl: HTMLElement;
 let panelDiagnosisEl: HTMLElement;
 let panelInterestEl: HTMLElement;
+let workspaceEl: HTMLElement;
 let infoPanelVisible = false;
+
+// Data-panel chart controls (shared across sessions, re-applied on each render)
+let dataSuppressZero = false;
+const dataAutoRange = new Set<string>();   // series keys forced to data-driven Y range
 
 let allBootsCb: HTMLInputElement;
 let piiButton: HTMLButtonElement;
@@ -392,6 +397,13 @@ function refreshDiagnosis(s: Session): void {
   if (hasAlerts) showInfoPanel();
 }
 
+function renderDataControls(): string {
+  const z = dataSuppressZero ? ' checked' : '';
+  return '<div class="dp-controls">' +
+    `<label><input type="checkbox" id="dp_suppress_zero"${z}>suppress zero series</label>` +
+    '</div>';
+}
+
 function refreshDataPlot(s: Session): void {
   if (!dataPlotEl || s !== active) return;
   const sum = s.showAllBoots ? s.cumulative : s.summary;
@@ -400,14 +412,21 @@ function refreshDataPlot(s: Session): void {
   // Telemetry parse is O(n) over lineHistory — only run when the panel is open.
   let telHtml = '';
   if (panelDataEl && !panelDataEl.hidden) {
-    telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))));
+    const opts = {
+      suppressZero: dataSuppressZero,
+      autoRange: dataAutoRange,
+      large: workspaceEl.classList.contains('analysis'),
+    };
+    telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))), opts);
   }
-  const html = hopHtml + chanHtml + telHtml;
-  if (html) {
-    dataPlotEl.innerHTML = html;
-    dataDotEl?.classList.add('visible');
-    showInfoPanel();
+  const chartsHtml = hopHtml + chanHtml + telHtml;
+  if (!chartsHtml) {
+    dataPlotEl.innerHTML = '';
+    return;
   }
+  dataPlotEl.innerHTML = renderDataControls() + `<div class="dp-charts">${chartsHtml}</div>`;
+  dataDotEl?.classList.add('visible');
+  showInfoPanel();
 }
 
 function resetFilters(s: Session): void {
@@ -786,6 +805,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   panelDataEl = document.getElementById('panel_data')!;
   panelDiagnosisEl = document.getElementById('panel_diagnosis')!;
   panelInterestEl = document.getElementById('panel_interest')!;
+  workspaceEl = document.querySelector('.workspace')!;
   dataDotEl = document.getElementById('data_dot')!;
   diagnosisDotEl = document.getElementById('diagnosis_dot')!;
   interestDotEl = document.getElementById('interest_dot')!;
@@ -846,6 +866,32 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Telemetry parse is deferred; trigger it now that the panel is visible.
       if (panel === 'data') refreshDataPlot(active);
     });
+  });
+
+  // Analysis mode: expand the info panel and shrink the serial log
+  const analysisToggle = document.getElementById('analysis_toggle') as HTMLButtonElement;
+  analysisToggle.addEventListener('click', () => {
+    const on = workspaceEl.classList.toggle('analysis');
+    analysisToggle.classList.toggle('btn-active', on);
+    analysisToggle.textContent = on ? '⤡' : '⤢';
+    analysisToggle.title = on ? 'Collapse analysis view' : 'Expand analysis view';
+    refreshDataPlot(active);   // regenerate charts at the new (large/small) size
+    active.fit.fit();
+  });
+
+  // Data-panel chart controls (delegated — content is rebuilt on every refresh)
+  dataPlotEl.addEventListener('change', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.id === 'dp_suppress_zero') {
+      dataSuppressZero = (t as HTMLInputElement).checked;
+      refreshDataPlot(active);
+    } else if (t.classList.contains('dp-autorange')) {
+      const key = t.dataset['key'];
+      if (key === undefined) return;
+      if ((t as HTMLInputElement).checked) dataAutoRange.add(key);
+      else dataAutoRange.delete(key);
+      refreshDataPlot(active);
+    }
   });
 
   // Info panel close
