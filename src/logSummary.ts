@@ -1897,6 +1897,16 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const hash = m[1].toLowerCase();
     s.txChannelHashCounts[hash] = (s.txChannelHashCounts[hash] ?? 0) + 1;
   },
+
+  // #204 Node status update — "Node status update: N online, N total"
+  // Source: NodeStatus.h:59. Keeps online/total fresh between full telemetry
+  // broadcasts (#26) and feeds the Node-status data tile.
+  (line, s) => {
+    const m = line.match(/Node status update: (\d+) online, (\d+) total/);
+    if (!m) return;
+    s.numOnlineNodes = Number(m[1]);
+    s.numTotalNodes = Number(m[2]);
+  },
 ];
 
 export function updateSummary(line: string, summary: DeviceSummary): void {
@@ -3014,6 +3024,32 @@ export function renderChannelHashChart(s: DeviceSummary): string {
     `<span class="hc-dot" style="background:#67EA94"></span>heard` +
     `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>sent</div>`;
   return `<div class="hc-section"><div class="hc-label">Packets per channel hash</div>${svg}${legend}</div>`;
+}
+
+// A text tile showing the latest node-status snapshot (from the most recent
+// "Node status update" / DeviceTelemetry broadcast).
+export function renderNodeStatusTile(s: DeviceSummary): string {
+  const rows: Array<[string, string]> = [];
+  if (s.numOnlineNodes !== undefined) {
+    rows.push(['Mesh nodes', `${s.numOnlineNodes} online / ${s.numTotalNodes ?? '?'} total`]);
+  }
+  if (s.batteryPct !== undefined) {
+    const v = s.batteryMv ? ` · ${(Number(s.batteryMv) / 1000).toFixed(2)} V` : '';
+    const charge = s.usbPower ? ' ⚡' : '';
+    const pct = s.batteryPct === '101' ? 'USB / external' : `${s.batteryPct}%`;
+    rows.push(['Battery', `${pct}${v}${charge}`]);
+  }
+  if (s.channelUtil !== undefined) {
+    const air = s.airUtilTx !== undefined ? ` · TX ${s.airUtilTx}%` : '';
+    rows.push(['Channel', `util ${s.channelUtil}%${air}`]);
+  }
+  if (s.uptime !== undefined) rows.push(['Uptime', fmtUptime(s.uptime)]);
+  if (rows.length === 0) return '';
+  const body = rows.map(([k, v]) =>
+    `<div class="ns-row"><span class="ns-k">${k}</span><span class="ns-v">${v}</span></div>`,
+  ).join('');
+  return `<div class="hc-section"><div class="hc-label">Node status</div>` +
+    `<div class="ns-tile">${body}</div></div>`;
 }
 
 function svgGridLine(x1: number, x2: number, y: number): string {
