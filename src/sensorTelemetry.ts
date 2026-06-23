@@ -156,7 +156,8 @@ const DEFAULT_RANGES: Record<string, [number, number]> = {
   voltage: [2, 4.5],
   ch1_voltage: [2, 4.5],
   ch2_voltage: [2, 4.5],
-  // air_util_tx / channel_utilization are usually a few % — auto-scale by default
+  channel_utilization: [0, 100],
+  air_util_tx: [0, 100],
   relative_humidity: [0, 100],
   co2_rh: [0, 100],
   hcho_rh: [0, 100],
@@ -171,18 +172,31 @@ const DEFAULT_RANGES: Record<string, [number, number]> = {
   heart_bpm: [40, 180],
 };
 
+// Metrics that have a fixed range available but should auto-scale by default
+// (they're usually only a few percent, so a 0–100 axis flattens them).
+const AUTO_BY_DEFAULT = new Set(['channel_utilization', 'air_util_tx']);
+
+function normMetric(metric: string): string {
+  return metric.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
 // Returns the fixed default [min, max] for a metric, or null if none is known
 // (in which case the chart always auto-ranges).
 function defaultRange(metric: string): [number, number] | null {
-  const k = metric.trim().toLowerCase().replace(/\s+/g, '_');
+  const k = normMetric(metric);
   if (DEFAULT_RANGES[k]) return DEFAULT_RANGES[k];
   if (/^pm(10|25|100)/.test(k)) return [0, 150];
   return null;
 }
 
+function autoByDefault(metric: string): boolean {
+  return AUTO_BY_DEFAULT.has(normMetric(metric));
+}
+
 export interface ChartOptions {
   suppressZero: boolean;
-  autoRange: Set<string>;   // series keys the user has forced to data-driven range
+  autoRange: Set<string>;   // series keys the user pinned to data-driven range
+  fixedRange: Set<string>;  // series keys the user pinned to the fixed default range
   large: boolean;           // analysis mode — render bigger, squarer chart tiles
 }
 
@@ -233,10 +247,14 @@ function telLine(series: SensorSeries, opts: ChartOptions): string {
   }
   if (xMin === xMax) xMax = xMin + 1;
 
-  // Y range: use the fixed default unless the user forced auto-range, or there
-  // is no sensible default for this metric.
+  // Y range: a per-chart "auto" toggle, defaulting to the fixed range for most
+  // metrics but to auto for the few that are usually tiny (util %). The user's
+  // explicit pin (autoRange/fixedRange) overrides the default either way.
   const def = defaultRange(series.metric);
-  const useAuto = opts.autoRange.has(key) || !def;
+  let useAuto: boolean;
+  if (opts.autoRange.has(key)) useAuto = true;
+  else if (opts.fixedRange.has(key)) useAuto = false;
+  else useAuto = !def || autoByDefault(series.metric);
   let yMin: number; let yMax: number;
   if (useAuto) {
     yMin = dMin; yMax = dMax;

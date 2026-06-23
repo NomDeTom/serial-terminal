@@ -80,7 +80,8 @@ let workspaceEl: HTMLElement;
 
 // Data-panel chart controls (shared across sessions, re-applied on each render)
 let dataSuppressZero = false;
-const dataAutoRange = new Set<string>();   // series keys forced to data-driven Y range
+const dataAutoRange = new Set<string>();    // series keys the user pinned to auto
+const dataFixedRange = new Set<string>();   // series keys the user pinned to fixed
 
 let bootSinceBtn: HTMLButtonElement;
 let bootAllBtn: HTMLButtonElement;
@@ -428,6 +429,7 @@ function refreshDataPlot(s: Session): void {
     const opts = {
       suppressZero: dataSuppressZero,
       autoRange: dataAutoRange,
+      fixedRange: dataFixedRange,
       large: workspaceEl.classList.contains('analysis'),
     };
     telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))), opts);
@@ -965,8 +967,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (t.classList.contains('dp-autorange')) {
       const key = t.dataset['key'];
       if (key === undefined) return;
-      if ((t as HTMLInputElement).checked) dataAutoRange.add(key);
-      else dataAutoRange.delete(key);
+      // Record the user's explicit pin so it overrides the metric's default.
+      if ((t as HTMLInputElement).checked) {
+        dataAutoRange.add(key);
+        dataFixedRange.delete(key);
+      } else {
+        dataFixedRange.add(key);
+        dataAutoRange.delete(key);
+      }
       refreshDataPlot(active);
     }
   });
