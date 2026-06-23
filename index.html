@@ -515,6 +515,46 @@
       transition: all 0.15s;
     }
     .module-btn.active { background: rgba(167,139,250,0.15); color: #a78bfa; border-color: #a78bfa; }
+
+    /* Log search box + filter chip */
+    .log-search {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-family: monospace;
+      width: 160px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .log-search::placeholder { color: var(--muted); }
+    .log-search:focus { border-color: #38bdf8; }
+    .search-nav-btn {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 6px;
+      font-size: 10px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .search-nav-btn:hover { color: var(--text); border-color: var(--text); }
+    .search-filter-btn {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: monospace;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .search-filter-btn.active { background: rgba(56,189,248,0.15); color: #38bdf8; border-color: #38bdf8; }
     #polyfill_switcher { color: var(--muted); font-size: 11px; text-decoration: none; }
     #polyfill_switcher:hover { color: var(--text); }
     .pii-eg { font-size: 10px; color: var(--muted); font-weight: 400; }
@@ -721,6 +761,32 @@
     }
     /* Node-status text tile */
     .ns-tile { display: flex; flex-direction: column; gap: 3px; min-width: 160px; }
+    /* Seen-nodes table (data tab + analysis mode) */
+    .node-table-wrap { overflow-x: auto; }
+    .node-table {
+      border-collapse: collapse;
+      font-size: 10px;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .node-table th {
+      color: var(--muted);
+      font-weight: 600;
+      text-align: right;
+      padding: 2px 6px 3px 3px;
+      border-bottom: 1px solid var(--border);
+      cursor: help;
+    }
+    .node-table th:first-child { text-align: left; padding-left: 0; }
+    .node-table td {
+      text-align: right;
+      padding: 2px 6px 2px 3px;
+      border-bottom: 1px solid rgba(55,65,81,0.4);
+    }
+    .node-table td:first-child { text-align: left; padding-left: 0; }
+    .node-table tr:last-child td { border-bottom: none; }
+    /* In summary grid, node IDs are used as labels — use monospace so they align */
+    .sum-label code { font-family: monospace; font-size: 10px; }
     .ns-row { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
     .ns-k { color: var(--muted); }
     .ns-v { color: var(--text); font-weight: 600; text-align: right; }
@@ -841,6 +907,12 @@
     <span class="filter-label">MODULE</span>
     <button id="module_all_none" class="module-btn active" title="Select all / none">±</button>
     <div id="module_buttons" class="module-buttons"></div>
+    <div class="sep"></div>
+    <span class="filter-label">SEARCH</span>
+    <input id="log_search" class="log-search" type="search" placeholder="Search logs…" autocomplete="off" spellcheck="false">
+    <button id="search_prev" class="search-nav-btn" title="Previous match (Shift+Enter)">▲</button>
+    <button id="search_next" class="search-nav-btn" title="Next match (Enter)">▼</button>
+    <button id="search_filter" class="search-filter-btn" title="Show only lines matching the search">Filter</button>
     <div class="sep"></div>
     <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF <span class="pii-eg">lat=52.944 lon=-1.435</span></button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">

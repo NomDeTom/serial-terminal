@@ -5,6 +5,7 @@
 
 import {Terminal, IDecoration, IMarker} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
+import {SearchAddon} from '@xterm/addon-search';
 import {WebLinksAddon} from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import {serial as polyfill, SerialPort as SerialPortPolyfill} from 'web-serial-polyfill';
@@ -14,7 +15,7 @@ import {annotateLine, Annotation} from './annotations';
 import {
   DeviceSummary, emptySummary, updateSummary, updateSummaryCumulative,
   renderSummary, renderHopChart, renderChannelHashChart, renderNodeStatusTile,
-  renderNodeCountChart,
+  renderNodeCountChart, renderSeenNodesTable,
 } from './logSummary';
 import {parseLog as parseSensorLog, toSeries, renderTelemetryCharts} from './sensorTelemetry';
 import {renderDiagnosis} from './diagnosis';
@@ -39,6 +40,7 @@ interface Session {
   kind: 'serial' | 'file';
   term: Terminal;
   fit: FitAddon;
+  search: SearchAddon;
   container: HTMLElement;    // the .term-wrap toggled on view switch
   pii: PiiFilter;
   lineHistory: string[];
@@ -47,6 +49,8 @@ interface Session {
   cumulative: DeviceSummary;
   showAllBoots: boolean;
   levelFilter: Set<string>;
+  searchTerm: string;        // raw text from the search box
+  searchFilter: boolean;     // when true, only lines matching searchTerm render
   seenModules: Set<string>;
   hiddenModules: Set<string>;
   interest: InterestEntry[];
@@ -68,6 +72,8 @@ let dataPlotEl: HTMLElement;
 let diagnosisEl: HTMLElement;
 let interestEl: HTMLElement;
 let moduleBtnsEl: HTMLElement;
+let logSearchInput: HTMLInputElement;
+let searchFilterBtn: HTMLButtonElement;
 let portChipsEl: HTMLElement | undefined;
 let infoPanelEl: HTMLElement;
 let dataDotEl: HTMLElement;
@@ -133,14 +139,17 @@ function createSession(kind: 'serial' | 'file', container: HTMLElement, mount: H
     convertEol: true,
   });
   const fit = new FitAddon();
+  const search = new SearchAddon();
   term.loadAddon(fit);
+  term.loadAddon(search);
   term.loadAddon(new WebLinksAddon());
   term.open(mount);
   return {
-    kind, term, fit, container, pii: new PiiFilter(),
+    kind, term, fit, search, container, pii: new PiiFilter(),
     lineHistory: [], lineBuffer: '',
     summary: emptySummary(), cumulative: emptySummary(), showAllBoots: false,
     levelFilter: new Set(['D', 'I', 'W', 'E', 'C']),
+    searchTerm: '', searchFilter: false,
     seenModules: new Set(), hiddenModules: new Set(),
     interest: [], interestBySeq: new Map(), interestSeq: 0,
     decorations: [], decoMarkers: [],
@@ -155,6 +164,8 @@ function linePassesFilter(s: Session, line: string): boolean {
   const {level, module} = parseLine(line);
   if (level && !s.levelFilter.has(level)) return false;
   if (s.hiddenModules.has(moduleKey(module))) return false;
+  if (s.searchFilter && s.searchTerm &&
+      !line.toLowerCase().includes(s.searchTerm.toLowerCase())) return false;
   return true;
 }
 
@@ -437,7 +448,8 @@ function refreshDataPlot(s: Session): void {
     };
     telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))), opts);
   }
-  const chartsHtml = statusHtml + nodeCountHtml + hopHtml + chanHtml + telHtml;
+  const nodesHtml = renderSeenNodesTable(sum);
+  const chartsHtml = statusHtml + nodeCountHtml + hopHtml + chanHtml + nodesHtml + telHtml;
   if (!chartsHtml) {
     dataPlotEl.innerHTML = '';
     return;
@@ -449,8 +461,10 @@ function refreshDataPlot(s: Session): void {
 function resetFilters(s: Session): void {
   for (const lv of ['D', 'I', 'W', 'E', 'C']) s.levelFilter.add(lv);
   s.hiddenModules.clear();
+  s.searchFilter = false;
   document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => b.classList.add('active'));
   document.querySelectorAll<HTMLButtonElement>('.module-btn').forEach((b) => b.classList.add('active'));
+  searchFilterBtn?.classList.remove('active');
 }
 
 function rerender(s: Session): void {
@@ -495,6 +509,12 @@ function syncChrome(): void {
   document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => {
     b.classList.toggle('active', active.levelFilter.has(b.dataset['level']!));
   });
+  logSearchInput.value = active.searchTerm;
+  searchFilterBtn.classList.toggle('active', active.searchFilter);
+  // Refresh inline highlights for the newly active session's search term.
+  if (active.searchTerm && !active.searchFilter) {
+    active.search.findNext(active.searchTerm, {caseSensitive: false, incremental: true});
+  }
   syncBootToggle();
   updatePiiButton();
 
@@ -875,6 +895,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   diagnosisDotEl = document.getElementById('diagnosis_dot')!;
   interestDotEl = document.getElementById('interest_dot')!;
   moduleBtnsEl = document.getElementById('module_buttons')!;
+  logSearchInput = document.getElementById('log_search') as HTMLInputElement;
+  searchFilterBtn = document.getElementById('search_filter') as HTMLButtonElement;
   portChipsEl = document.getElementById('port_chips')!;
   statusDot = document.getElementById('statusDot')!;
   fileNameEl = document.getElementById('file_name')!;
@@ -1027,6 +1049,44 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       rerender(active);
     });
+  });
+
+  // Log search box + "Filter" chip (show only matching lines when active)
+  const runSearch = () => {
+    const term = active.searchTerm;
+    if (term) active.search.findNext(term, {caseSensitive: false, incremental: true});
+  };
+  logSearchInput.addEventListener('input', () => {
+    active.searchTerm = logSearchInput.value;
+    if (active.searchFilter) {
+      rerender(active);
+    } else {
+      runSearch();
+    }
+  });
+  logSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        active.search.findPrevious(active.searchTerm, {caseSensitive: false});
+      } else {
+        active.search.findNext(active.searchTerm, {caseSensitive: false});
+      }
+    } else if (e.key === 'Escape') {
+      logSearchInput.blur();
+    }
+  });
+  document.getElementById('search_prev')!.addEventListener('click', () => {
+    active.search.findPrevious(active.searchTerm, {caseSensitive: false});
+  });
+  document.getElementById('search_next')!.addEventListener('click', () => {
+    active.search.findNext(active.searchTerm, {caseSensitive: false});
+  });
+  searchFilterBtn.addEventListener('click', () => {
+    active.searchFilter = !active.searchFilter;
+    searchFilterBtn.classList.toggle('active', active.searchFilter);
+    rerender(active);
+    if (!active.searchFilter && active.searchTerm) runSearch();
   });
 
   // PII toggle

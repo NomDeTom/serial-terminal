@@ -21,6 +21,8 @@ export class PiiFilter {
         .replace(/(?:0x|!)([0-9a-fA-F]{8})/gi, (_, hex) => `[${this.alias(hex)}]`)
     // Node IDs with @ prefix (pos@XXXXXXXX) → @[NODE-N]
         .replace(/@([0-9a-fA-F]{8})/gi, (_, hex) => `@[${this.alias(hex)}]`)
+    // Node IDs printed as bare hex in node= fields (no 0x prefix, e.g. "POSITION node=72336512")
+        .replace(/\bnode=([0-9a-fA-F]{8})\b/gi, (_, hex) => `node=[${this.alias(hex)}]`)
     // JSON long/short names from nodeInfo payloads
         .replace(/"longName"\s*:\s*"[^"]*"/g, '"longName":"[REDACTED]"')
         .replace(/"shortName"\s*:\s*"[^"]*"/g, '"shortName":"[REDACTED]"')
@@ -39,6 +41,7 @@ export class PiiFilter {
     return text
         .replace(/(?:0x|!)([0-9a-fA-F]{8})/gi, `${HI}$&${HI0}`)
         .replace(/@([0-9a-fA-F]{8})/gi, `@${HI}$1${HI0}`)
+        .replace(/\bnode=([0-9a-fA-F]{8})\b/gi, `node=${HI}$1${HI0}`)
         .replace(/"longName"\s*:\s*"[^"]*"/g, `${HI}$&${HI0}`)
         .replace(/"shortName"\s*:\s*"[^"]*"/g, `${HI}$&${HI0}`)
         .replace(/\blat(?:itude)?\s*=\s*-?[0-9]+\.?[0-9]*/gi, `${HI}$&${HI0}`)

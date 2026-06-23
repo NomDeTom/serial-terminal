@@ -103,6 +103,15 @@ export function parseLog(text: string): SensorRow[] {
         rows.push({boot, uptime, time, source: 'local', category: cat, ...kv});
       }
       seenAny = true;
+      continue;
+    }
+
+    // "[RadioIf] Corrected frequency offset: N" — per-packet crystal drift measurement
+    const freqOff = /^Corrected frequency offset:\s*([-\d.]+)$/.exec(msg);
+    if (freqOff && mod === 'RadioIf') {
+      rows.push({boot, uptime, time, source: 'local', category: 'radio',
+        metric: 'freq_offset', value: Number(freqOff[1]), unit: 'Hz'});
+      seenAny = true;
     }
   }
   return rows;
@@ -146,8 +155,9 @@ const CAT_COLOR: Record<string, string> = {
   power: '#a78bfa',
   health: '#ff7b72',
   host: '#79c0ff',
+  radio: '#f59e0b',
 };
-const CAT_ORDER = ['device', 'environment', 'airQuality', 'power', 'health', 'host'];
+const CAT_ORDER = ['device', 'environment', 'airQuality', 'power', 'health', 'host', 'radio'];
 
 // Sensible fixed Y-axis ranges per telemetry metric, applied unless the user
 // ticks "auto" on that chart. Keyed by the normalized metric name.
