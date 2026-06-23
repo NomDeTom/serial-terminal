@@ -425,10 +425,18 @@
 
     .info-body {
       flex: 1;
-      overflow-y: auto;
+      overflow-y: scroll;   /* always-on scrollbar so it's clear it scrolls */
       overflow-x: hidden;   /* charts scale to fit; never scroll sideways */
       min-height: 0;
     }
+    .info-body::-webkit-scrollbar { width: 12px; }
+    .info-body::-webkit-scrollbar-track { background: var(--bg); }
+    .info-body::-webkit-scrollbar-thumb {
+      background: var(--surface2);
+      border-radius: 6px;
+      border: 2px solid var(--surface);
+    }
+    .info-body::-webkit-scrollbar-thumb:hover { background: #4b5563; }
     .info-pane { padding: 10px 12px; }
     .info-pane[hidden] { display: none; }
 
