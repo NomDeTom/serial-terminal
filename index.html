@@ -307,8 +307,49 @@
       border-left: 1px solid var(--border);
       background: var(--surface);
       min-height: 0;
+      position: relative;
+      padding-left: 22px;   /* room for the left-edge control strip */
     }
     #info_panel[hidden] { display: none; }
+
+    /* Left-edge control strip — click anywhere to expand/collapse analysis */
+    .panel-edge {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 22px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding-top: 6px;
+      background: var(--surface2);
+      border-right: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.12s;
+      z-index: 5;
+    }
+    .panel-edge:hover { background: var(--green-bg); }
+    .panel-edge #info_close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px;
+      border-radius: 3px;
+    }
+    .panel-edge #info_close:hover { color: #ef4444; }
+    .panel-edge-arrow {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 14px;
+      user-select: none;
+    }
+    .panel-edge:hover .panel-edge-arrow { color: var(--green); }
 
     .info-header {
       display: flex;
@@ -345,30 +386,6 @@
     }
     .info-tab-dot.visible { opacity: 1; }
     #all_boots_wrap:hover { color: var(--text); }
-    #analysis_toggle {
-      background: none;
-      border: 1px solid transparent;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 13px;
-      line-height: 1;
-      padding: 2px 5px;
-      margin-left: auto;
-      border-radius: 3px;
-    }
-    #analysis_toggle:hover { color: var(--text); }
-    #analysis_toggle.btn-active { color: var(--green); border-color: var(--green); background: var(--green-bg); }
-    #info_close {
-      background: none;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 12px;
-      padding: 2px 4px;
-      margin-left: 2px;
-      border-radius: 3px;
-    }
-    #info_close:hover { color: var(--text); }
 
     .info-body {
       flex: 1;
@@ -803,13 +820,16 @@
 
     <!-- Info sidebar: shown once summary/hop data is extracted -->
     <div id="info_panel" hidden>
+      <!-- Left-edge control strip: click to expand/collapse, ✕ to hide -->
+      <div id="panel_edge" class="panel-edge" title="Click to expand / collapse">
+        <button id="info_close" title="Hide panel">✕</button>
+        <span id="panel_edge_arrow" class="panel-edge-arrow">⟨</span>
+      </div>
       <div class="info-header">
         <button class="info-tab active" data-panel="summary">SUMMARY</button>
         <button class="info-tab" data-panel="interest">INTEREST <span class="info-tab-dot" id="interest_dot"></span></button>
         <button class="info-tab" data-panel="data">DATA <span class="info-tab-dot" id="data_dot"></span></button>
         <button class="info-tab" data-panel="diagnosis">DIAG <span class="info-tab-dot" id="diagnosis_dot"></span></button>
-        <button id="analysis_toggle" title="Expand analysis view">⤢</button>
-        <button id="info_close" title="Close panel">✕</button>
       </div>
       <div class="info-body">
         <div id="panel_summary" class="info-pane">

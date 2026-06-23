@@ -926,13 +926,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Analysis mode: expand the info panel and shrink the serial log
-  const analysisToggle = document.getElementById('analysis_toggle') as HTMLButtonElement;
-  analysisToggle.addEventListener('click', () => {
+  // Analysis mode: clicking the left-edge strip expands/collapses the panel
+  const panelEdge = document.getElementById('panel_edge')!;
+  const edgeArrow = document.getElementById('panel_edge_arrow')!;
+  panelEdge.addEventListener('click', () => {
     const on = workspaceEl.classList.toggle('analysis');
-    analysisToggle.classList.toggle('btn-active', on);
-    analysisToggle.textContent = on ? '⤡' : '⤢';
-    analysisToggle.title = on ? 'Collapse analysis view' : 'Expand analysis view';
+    edgeArrow.textContent = on ? '⟩' : '⟨';
+    panelEdge.title = on ? 'Click to collapse' : 'Click to expand';
     refreshDataPlot(active);   // regenerate charts at the new (large/small) size
     active.fit.fit();
   });
@@ -952,8 +952,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Info panel close
-  document.getElementById('info_close')!.addEventListener('click', () => {
+  // Info panel close (✕ on the edge strip — don't also fire the edge toggle)
+  document.getElementById('info_close')!.addEventListener('click', (e) => {
+    e.stopPropagation();
     hideInfoPanel();
   });
 
