@@ -162,7 +162,11 @@
       font-size: 11px;
       white-space: nowrap;
       flex-shrink: 0;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: border-color 0.12s, color 0.12s;
     }
+    .port-chip:hover { border-color: var(--green); color: var(--text); }
     .port-chip::before { content: '●'; font-size: 7px; }
     .port-chip.port-connected { color: var(--green); }
     .port-chip.port-connected::before { color: var(--green); }

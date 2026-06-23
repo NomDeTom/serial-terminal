@@ -604,6 +604,22 @@ function findPortOption(p: SerialPort | SerialPortPolyfill): PortOption | null {
   return null;
 }
 
+// Clicking a port chip connects to that port (disconnecting the current one
+// first if needed). Clicking the already-connected chip disconnects.
+async function handlePortChipClick(
+    p: SerialPort | SerialPortPolyfill, record: PortRecord): Promise<void> {
+  if (p === port) {
+    await disconnectFromPort();
+    return;
+  }
+  if (record.status !== 'available') return;
+  if (port) await disconnectFromPort();
+  const opt = findPortOption(p);
+  if (!opt) return;
+  opt.selected = true;
+  connectToPort();
+}
+
 function updatePortBar(): void {
   const el = portChipsEl;
   if (!el) return;
@@ -626,6 +642,8 @@ function updatePortBar(): void {
     const chip = document.createElement('span');
     chip.className = `port-chip ${isConnected ? 'port-connected' : 'port-available'}`;
     chip.textContent = record.label;
+    chip.title = isConnected ? 'Connected — click to disconnect' : 'Click to connect';
+    chip.addEventListener('click', () => handlePortChipClick(p, record));
     el.appendChild(chip);
   }
 
