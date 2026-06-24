@@ -542,6 +542,12 @@
       transition: color 0.15s, border-color 0.15s;
     }
     .search-nav-btn:hover { color: var(--text); border-color: var(--text); }
+    .search-count {
+      font-size: 10px;
+      color: var(--muted);
+      min-width: 42px;
+      text-align: center;
+    }
     .search-filter-btn {
       background: var(--surface2);
       color: var(--muted);
@@ -555,6 +561,7 @@
       transition: all 0.15s;
     }
     .search-filter-btn.active { background: rgba(56,189,248,0.15); color: #38bdf8; border-color: #38bdf8; }
+    #highlight_lines.active { background: rgba(245,158,11,0.15); color: #f59e0b; border-color: #f59e0b; }
     #polyfill_switcher { color: var(--muted); font-size: 11px; text-decoration: none; }
     #polyfill_switcher:hover { color: var(--text); }
     .pii-eg { font-size: 10px; color: var(--muted); font-weight: 400; }
@@ -912,7 +919,9 @@
     <input id="log_search" class="log-search" type="search" placeholder="Search logs…" autocomplete="off" spellcheck="false">
     <button id="search_prev" class="search-nav-btn" title="Previous match (Shift+Enter)">▲</button>
     <button id="search_next" class="search-nav-btn" title="Next match (Enter)">▼</button>
+    <span id="search_count" class="search-count"></span>
     <button id="search_filter" class="search-filter-btn" title="Show only lines matching the search">Filter</button>
+    <button id="highlight_lines" class="search-filter-btn" title="Highlight full lines matching the search">Highlight</button>
     <div class="sep"></div>
     <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF <span class="pii-eg">lat=52.944 lon=-1.435</span></button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">

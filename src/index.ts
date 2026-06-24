@@ -51,6 +51,7 @@ interface Session {
   levelFilter: Set<string>;
   searchTerm: string;        // raw text from the search box
   searchFilter: boolean;     // when true, only lines matching searchTerm render
+  highlightLines: boolean;   // when true, full-line decorations on matching lines
   seenModules: Set<string>;
   hiddenModules: Set<string>;
   interest: InterestEntry[];
@@ -74,6 +75,8 @@ let interestEl: HTMLElement;
 let moduleBtnsEl: HTMLElement;
 let logSearchInput: HTMLInputElement;
 let searchFilterBtn: HTMLButtonElement;
+let highlightLinesBtn: HTMLButtonElement;
+let searchCountEl: HTMLElement;
 let portChipsEl: HTMLElement | undefined;
 let infoPanelEl: HTMLElement;
 let dataDotEl: HTMLElement;
@@ -147,6 +150,7 @@ function createSession(kind: 'serial' | 'file', container: HTMLElement, mount: H
     fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", monospace',
     fontSize: 13,
     convertEol: true,
+    overviewRuler: {width: 12},
   });
   const fit = new FitAddon();
   const search = new SearchAddon();
@@ -159,7 +163,7 @@ function createSession(kind: 'serial' | 'file', container: HTMLElement, mount: H
     lineHistory: [], lineBuffer: '',
     summary: emptySummary(), cumulative: emptySummary(), showAllBoots: false,
     levelFilter: new Set(['D', 'I', 'W', 'E', 'C']),
-    searchTerm: '', searchFilter: false,
+    searchTerm: '', searchFilter: false, highlightLines: false,
     seenModules: new Set(), hiddenModules: new Set(),
     interest: [], interestBySeq: new Map(), interestSeq: 0,
     decorations: [], decoMarkers: [],
@@ -177,6 +181,28 @@ function linePassesFilter(s: Session, line: string): boolean {
   if (s.searchFilter && s.searchTerm &&
       !line.toLowerCase().includes(s.searchTerm.toLowerCase())) return false;
   return true;
+}
+
+function countSearchMatches(s: Session): number {
+  if (!s.searchTerm) return 0;
+  const lc = s.searchTerm.toLowerCase();
+  let n = 0;
+  for (const line of s.lineHistory) {
+    const {level, module} = parseLine(line);
+    if (level && !s.levelFilter.has(level)) continue;
+    if (s.hiddenModules.has(moduleKey(module))) continue;
+    if (line.toLowerCase().includes(lc)) n++;
+  }
+  return n;
+}
+
+function updateSearchCount(s: Session): void {
+  if (!searchCountEl) return;
+  if (!s.searchTerm) {
+    searchCountEl.textContent = ''; return;
+  }
+  const n = countSearchMatches(s);
+  searchCountEl.textContent = `${n}`;
 }
 
 function addModuleButton(s: Session, key: string): void {
@@ -239,9 +265,12 @@ function decorateGutter(el: HTMLElement, ann: Annotation, entry?: InterestEntry)
 
 // Writes a line to the session's terminal and attaches a gutter decoration if it
 // is an annotated line. When `entry` is supplied its `marker` is linked so the
-// Interest tab can scroll to the line.
-function writeAndDecorate(s: Session, clean: string, ann?: Annotation, entry?: InterestEntry): void {
-  if (!ann) {
+// Interest tab can scroll to the line. When `highlight` is true, a full-width
+// amber background is applied and an overview-ruler mark is added.
+function writeAndDecorate(
+    s: Session, clean: string, ann?: Annotation,
+    entry?: InterestEntry, highlight?: boolean): void {
+  if (!ann && !highlight) {
     s.term.writeln(renderLine(s, clean));
     return;
   }
@@ -250,10 +279,24 @@ function writeAndDecorate(s: Session, clean: string, ann?: Annotation, entry?: I
     if (!marker) return;
     s.decoMarkers.push(marker);
     if (entry) entry.marker = marker;
-    const deco = s.term.registerDecoration({marker, x: 0, width: 2, layer: 'top'});
-    if (deco) {
-      deco.onRender((el) => decorateGutter(el, ann, entry));
-      s.decorations.push(deco);
+    if (ann) {
+      const deco = s.term.registerDecoration({marker, x: 0, width: 2, layer: 'top'});
+      if (deco) {
+        deco.onRender((el) => decorateGutter(el, ann, entry));
+        s.decorations.push(deco);
+      }
+    }
+    if (highlight) {
+      const hdeco = s.term.registerDecoration({
+        marker, x: 0, width: s.term.cols, layer: 'bottom',
+        overviewRulerOptions: {color: 'rgba(245,158,11,0.8)', position: 'full'},
+      });
+      if (hdeco) {
+        hdeco.onRender((el) => {
+          el.style.backgroundColor = 'rgba(245,158,11,0.1)';
+        });
+        s.decorations.push(hdeco);
+      }
     }
   });
 }
@@ -391,7 +434,9 @@ function addLine(s: Session, raw: string, deferRender = false): void {
     if (!deferRender) refreshInterest(s);
   }
   if (linePassesFilter(s, clean)) {
-    writeAndDecorate(s, clean, ann, entry);
+    const hl = s.highlightLines && !!s.searchTerm &&
+      clean.toLowerCase().includes(s.searchTerm.toLowerCase());
+    writeAndDecorate(s, clean, ann, entry, hl);
     if (autoscroll && !deferRender) s.term.scrollToBottom();
   }
 }
@@ -472,23 +517,29 @@ function resetFilters(s: Session): void {
   for (const lv of ['D', 'I', 'W', 'E', 'C']) s.levelFilter.add(lv);
   s.hiddenModules.clear();
   s.searchFilter = false;
+  s.highlightLines = false;
   document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => b.classList.add('active'));
   document.querySelectorAll<HTMLButtonElement>('.module-btn').forEach((b) => b.classList.add('active'));
   searchFilterBtn?.classList.remove('active');
+  highlightLinesBtn?.classList.remove('active');
 }
 
 function rerender(s: Session): void {
   disposeDecorations(s);
   s.term.clear();
   let ip = 0;
+  const hlTerm = s.highlightLines && !!s.searchTerm;
+  const lcTerm = hlTerm ? s.searchTerm.toLowerCase() : '';
   for (const line of s.lineHistory) {
     const ann = annotateLine(line);
     const entry = ann ? s.interest[ip++] : undefined;
     if (linePassesFilter(s, line)) {
-      writeAndDecorate(s, line, ann, entry);
+      const hl = hlTerm && line.toLowerCase().includes(lcTerm);
+      writeAndDecorate(s, line, ann, entry, hl);
     }
   }
   refreshInterest(s);
+  if (s === active) updateSearchCount(s);
 }
 
 function processChunk(s: Session, chunk: Uint8Array): void {
@@ -521,6 +572,8 @@ function syncChrome(): void {
   });
   logSearchInput.value = active.searchTerm;
   searchFilterBtn.classList.toggle('active', active.searchFilter);
+  highlightLinesBtn.classList.toggle('active', active.highlightLines);
+  updateSearchCount(active);
   // Refresh inline highlights for the newly active session's search term.
   if (active.searchTerm && !active.searchFilter) {
     active.search.findNext(active.searchTerm, {caseSensitive: false, incremental: true, decorations: SEARCH_DECO});
@@ -907,6 +960,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   moduleBtnsEl = document.getElementById('module_buttons')!;
   logSearchInput = document.getElementById('log_search') as HTMLInputElement;
   searchFilterBtn = document.getElementById('search_filter') as HTMLButtonElement;
+  highlightLinesBtn = document.getElementById('highlight_lines') as HTMLButtonElement;
+  searchCountEl = document.getElementById('search_count') as HTMLElement;
   portChipsEl = document.getElementById('port_chips')!;
   statusDot = document.getElementById('statusDot')!;
   fileNameEl = document.getElementById('file_name')!;
@@ -1068,10 +1123,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   logSearchInput.addEventListener('input', () => {
     active.searchTerm = logSearchInput.value;
-    if (active.searchFilter) {
-      rerender(active);
+    if (active.searchFilter || active.highlightLines) {
+      rerender(active);  // rerender calls updateSearchCount
     } else {
       runSearch();
+      updateSearchCount(active);
     }
   });
   logSearchInput.addEventListener('keydown', (e) => {
@@ -1097,6 +1153,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     searchFilterBtn.classList.toggle('active', active.searchFilter);
     rerender(active);
     if (!active.searchFilter && active.searchTerm) runSearch();
+  });
+  highlightLinesBtn.addEventListener('click', () => {
+    active.highlightLines = !active.highlightLines;
+    highlightLinesBtn.classList.toggle('active', active.highlightLines);
+    rerender(active);
+    if (active.searchTerm) runSearch();
   });
 
   // PII toggle

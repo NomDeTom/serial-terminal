@@ -203,9 +203,14 @@ export interface DeviceSummary {
   decodedChannelHashCounts: Record<string, number>;
   txChannelHashCounts: Record<string, number>;
 
+  // Duplicate relay-echo counts per channel hash: packets heard again for an id already seen.
+  dupChannelHashCounts: Record<string, number>;
+
   // Transient correlation state: packet id → channel hash, populated on "Lora RX" and
   // consumed on "decoded message". Not for display; cleared on boot reset.
   _rxHashById: Record<string, string>;
+  // All packet ids seen this boot — used to detect relay-echo duplicates.
+  _seenPacketIds: Set<string>;
 
   // Per-node aggregated stats for nodes heard over the air this session.
   seenNodes: Record<string, NodeStats>;
@@ -436,7 +441,8 @@ export function emptySummary(): DeviceSummary {
     keyVerificationFailures: 0, neighborDbFull: 0,
     tracerouteHopLimitExceeded: 0, tracerouteErrors: 0, positionZeroSkipped: 0,
     rxChannelHashCounts: {}, decodedChannelHashCounts: {}, txChannelHashCounts: {},
-    _rxHashById: {},
+    dupChannelHashCounts: {},
+    _rxHashById: {}, _seenPacketIds: new Set(),
     seenNodes: {},
     nodeCountHistory: [],
   };
@@ -1923,7 +1929,12 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const hash = chM[1].toLowerCase();
     const id = idM[1].toLowerCase();
     s.rxChannelHashCounts[hash] = (s.rxChannelHashCounts[hash] ?? 0) + 1;
-    s._rxHashById[id] = hash;
+    if (s._seenPacketIds.has(id)) {
+      s.dupChannelHashCounts[hash] = (s.dupChannelHashCounts[hash] ?? 0) + 1;
+    } else {
+      s._seenPacketIds.add(id);
+      s._rxHashById[id] = hash;
+    }
 
     const frM = line.match(/\bfr=(0x[\da-fA-F]+)/);
     if (!frM) return;
@@ -3086,8 +3097,9 @@ export function renderChannelHashChart(s: DeviceSummary): string {
   const n = hashes.length;
   const rx = hashes.map((h) => s.rxChannelHashCounts[h] ?? 0);
   const dec = hashes.map((h) => s.decodedChannelHashCounts[h] ?? 0);
+  const dup = hashes.map((h) => s.dupChannelHashCounts[h] ?? 0);
   const tx = hashes.map((h) => s.txChannelHashCounts[h] ?? 0);
-  const maxVal = Math.max(1, ...rx, ...dec, ...tx);
+  const maxVal = Math.max(1, ...rx, ...dec.map((d, i) => d + dup[i]), ...tx);
   const groupW = cW / n;
   const gap = Math.max(2, groupW * 0.2);
   const barW = (groupW - gap) / 3;
@@ -3097,6 +3109,7 @@ export function renderChannelHashChart(s: DeviceSummary): string {
     const gx = pL + i * groupW + gap / 2;
     const rH = (rx[i] / maxVal) * cH;
     const dH = (dec[i] / maxVal) * cH;
+    const uH = (dup[i] / maxVal) * cH;
     const tH = (tx[i] / maxVal) * cH;
     const g: string[] = [];
     // Transparent full-column hit area so the hover tooltip covers the whole group.
@@ -3112,6 +3125,11 @@ export function renderChannelHashChart(s: DeviceSummary): string {
       g.push(`<rect x="${(gx + barW).toFixed(1)}" y="${dy}" width="${barW.toFixed(1)}" ` +
         `height="${dH.toFixed(1)}" fill="#38bdf8" opacity="0.85" rx="1"/>`);
     }
+    if (uH > 0) {
+      const uy = (pT + cH - dH - uH).toFixed(1);
+      g.push(`<rect x="${(gx + barW).toFixed(1)}" y="${uy}" width="${barW.toFixed(1)}" ` +
+        `height="${uH.toFixed(1)}" fill="#7dd3fc" opacity="0.75" rx="1"/>`);
+    }
     if (tH > 0) {
       const ty = (pT + cH - tH).toFixed(1);
       g.push(`<rect x="${(gx + 2 * barW).toFixed(1)}" y="${ty}" width="${barW.toFixed(1)}" ` +
@@ -3122,7 +3140,8 @@ export function renderChannelHashChart(s: DeviceSummary): string {
     g.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">` +
       `${hashes[i]}</text>`);
     const hint = publicChannelHint(Number(hashes[i]));
-    const title = `Ch ${hashes[i]} — heard ${rx[i]}, decoded ${dec[i]}, sent ${tx[i]}` +
+    const title = `Ch ${hashes[i]} — heard ${rx[i]}, decoded ${dec[i]}, ` +
+      `dup ${dup[i]}, sent ${tx[i]}` +
       (hint ? `\nPossible public channels:\n${hint}` : '\n(no known public preset)');
     parts.push(`<g><title>${xmlEscape(title)}</title>${g.join('')}</g>`);
   }
@@ -3132,6 +3151,7 @@ export function renderChannelHashChart(s: DeviceSummary): string {
   const legend = `<div class="hc-legend">` +
     `<span class="hc-dot" style="background:#67EA94"></span>heard` +
     `<span class="hc-dot" style="background:#38bdf8;margin-left:8px"></span>decoded` +
+    `<span class="hc-dot" style="background:#7dd3fc;margin-left:8px"></span>dup` +
     `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>sent</div>`;
   return `<div class="hc-section"><div class="hc-label">Packets per channel hash</div>${svg}${legend}</div>`;
 }
@@ -3320,6 +3340,10 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
 
     const hint = publicChannelHint(Number(hash));
     const hintStr = hint ? ` · ${hint.split('\n')[0]}` : '';
+    const chRx = s.rxChannelHashCounts[hash] ?? 0;
+    const chDec = s.decodedChannelHashCounts[hash] ?? 0;
+    const chDup = s.dupChannelHashCounts[hash] ?? 0;
+    const statsStr = ` · ${chRx} heard · ${chDec} decoded · ${chDup} dup`;
 
     const hdr = `<tr class="node-hdr">` +
       `<th>Node</th><th title="Heard on this channel">Heard</th>` +
@@ -3342,7 +3366,7 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
 
     sections.push(
         `<div class="hc-section">` +
-        `<div class="hc-label">NODES ON Ch ${hash}${hintStr}</div>` +
+        `<div class="hc-label">NODES ON Ch ${hash}${hintStr}${statsStr}</div>` +
         `<div class="node-table-wrap">` +
         `<table class="node-table">${hdr}${rowsHtml}</table>` +
         `</div></div>`,
