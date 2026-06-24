@@ -33,6 +33,7 @@ const CRIT_ERR: Record<number, string> = {
 export interface NodeStats {
   heard: number;
   decoded: number;
+  dup: number;
   hopSum: number;
   hopCount: number;
   hopMin: number;       // Infinity until first valid hop measurement
@@ -1929,7 +1930,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const hash = chM[1].toLowerCase();
     const id = idM[1].toLowerCase();
     s.rxChannelHashCounts[hash] = (s.rxChannelHashCounts[hash] ?? 0) + 1;
-    if (s._seenPacketIds.has(id)) {
+    const isDup = s._seenPacketIds.has(id);
+    if (isDup) {
       s.dupChannelHashCounts[hash] = (s.dupChannelHashCounts[hash] ?? 0) + 1;
     } else {
       s._seenPacketIds.add(id);
@@ -1941,12 +1943,13 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const nodeId = frM[1].toLowerCase();
     if (!s.seenNodes[nodeId]) {
       s.seenNodes[nodeId] = {
-        heard: 0, decoded: 0, hopSum: 0, hopCount: 0,
+        heard: 0, decoded: 0, dup: 0, hopSum: 0, hopCount: 0,
         hopMin: Infinity, channels: {},
       };
     }
     const ns = s.seenNodes[nodeId];
     ns.heard++;
+    if (isDup) ns.dup++;
     ns.channels[hash] = (ns.channels[hash] ?? 0) + 1;
     const hopLimM = line.match(/\bHopLim=(\d+)/);
     const hopStartM = line.match(/\bhopStart=(\d+)/);
@@ -3348,6 +3351,7 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
     const hdr = `<tr class="node-hdr">` +
       `<th>Node</th><th title="Heard on this channel">Heard</th>` +
       `<th title="Total decoded packets from this node">Decoded</th>` +
+      `<th title="Relay-echo duplicates from this node">Dup</th>` +
       `<th title="Average hops (hopStart − HopLim)">Avg hop</th>` +
       `<th title="Minimum hops observed — 0 = direct neighbor">Min hop</th>` +
       `<th>RSSI</th><th>SNR</th></tr>`;
@@ -3359,7 +3363,7 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
       const rssi = ns.lastRssi !== undefined ? String(ns.lastRssi) : '—';
       const snr = ns.lastSnr !== undefined ? ns.lastSnr.toFixed(1) : '—';
       return `<tr><td><code>${nodeId}</code></td>` +
-        `<td>${chHeard}</td><td>${ns.decoded}</td>` +
+        `<td>${chHeard}</td><td>${ns.decoded}</td><td>${ns.dup}</td>` +
         `<td>${avg}</td><td>${min}</td>` +
         `<td>${rssi}</td><td>${snr}</td></tr>`;
     }).join('');
