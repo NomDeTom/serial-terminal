@@ -105,13 +105,12 @@ export function renderDiagnosis(s: DeviceSummary): string {
   }
 
   // Radio SPI bus instability
-  if (hasSpiErrors(s) && (s.radioRecoveryReboot || s.agcCalibFailures > 3 || s.radioInitRetries > 2)) {
+  if (hasSpiErrors(s) && (s.radioRecoveryReboot || s.agcCalibFailures > 3)) {
     const spiCount = s.radioLibErrors.filter((e) => [-16, -705, -706, -707].includes(e.code)).length;
     diag.push({title: 'Radio SPI bus instability confirmed across multiple symptoms',
       detail: `${spiCount} SPI-class RadioLib error${spiCount !== 1 ? 's' : ''} ` +
         (s.radioRecoveryReboot ? '+ recovery reboot ' : '') +
         (s.agcCalibFailures > 3 ? `+ ${s.agcCalibFailures} AGC calibration failures ` : '') +
-        (s.radioInitRetries > 2 ? `+ ${s.radioInitRetries} init retries ` : '') +
         'all point to the same root cause. ' +
         'Likely causes: loose radio module socket, power-rail noise during TX (' +
         'add 100 µF decoupling near radio VCC), SPI clock line interference, ' +
@@ -133,15 +132,17 @@ export function renderDiagnosis(s: DeviceSummary): string {
   }
 
   // GPS total failure with identified cause (serial link)
+  // Uses checksum failures only — frame errors (gpsFrameErrors) come from baud-rate probing and
+  // are normal on any device where the GPS chip was previously configured to a non-default speed.
   const gpsChecksums = s.gpsChecksumFailTotal ?? 0;
-  if (s.gpsChipModel && s.gpsLocksAcquired === 0 && (gpsChecksums > 5 || s.gpsFrameErrors > 3)) {
-    diag.push({title: `GPS chip (${s.gpsChipModel}) detected but NMEA serial link is corrupted`,
-      detail: `${gpsChecksums} checksum failure${gpsChecksums !== 1 ? 's' : ''} + ` +
-        `${s.gpsFrameErrors} frame error${s.gpsFrameErrors !== 1 ? 's' : ''}. ` +
-        'The GPS module is present and powered but the UART data stream is garbled. ' +
+  if (s.gpsChipModel && s.gpsLocksAcquired === 0 && gpsChecksums > 5) {
+    diag.push({title: `GPS chip (${s.gpsChipModel}) detected but NMEA data stream is corrupted`,
+      detail: `${gpsChecksums} NMEA checksum failure${gpsChecksums !== 1 ? 's' : ''} after chip was detected. ` +
+        'The firmware only logs checksum failures once the running total exceeds 4, ' +
+        'so this count reflects persistent corruption, not warm-up noise. ' +
         'Root causes in order of likelihood: ' +
-        '(1) baud-rate mismatch — firmware probed chip at one speed but chip initialised at another; ' +
-        '(2) loose or swapped TX/RX wires; ' +
+        '(1) loose or swapped TX/RX wires; ' +
+        '(2) baud-rate settled at wrong speed after probe (chip re-initialised differently on a prior boot); ' +
         '(3) EMI from nearby radio antenna coupling into the GPS UART cable; ' +
         '(4) inadequate decoupling on GPS module VCC.'});
   }
@@ -149,10 +150,11 @@ export function renderDiagnosis(s: DeviceSummary): string {
   // OOM crash (task watchdog + very low heap)
   if (s.taskWatchdogTriggered && s.heapFree !== undefined && s.heapFree < 20000) {
     diag.push({title: 'Memory exhaustion crash: watchdog fired while heap critically low',
-      detail: `Task watchdog triggered with ${Math.round(s.heapFree / 1024)} KB heap free ` +
-        `(firmware minimum safe threshold: 1.5 KB — defined in configuration.h). ` +
-        'The mesh task was likely blocked on a failed heap allocation and stopped yielding ' +
-        'to the RTOS idle task within the 5-second watchdog window. ' +
+      detail: `Task watchdog triggered with ${Math.round(s.heapFree / 1024)} KB heap free. ` +
+        'At this level the device is well below the 40 KB threshold at which HTTPS processing is ' +
+        'suppressed, and approaching the 1.5 KB MINIMUM_SAFE_FREE_HEAP floor at which the NodeDB ' +
+        'stops accepting new nodes. The mesh task was likely blocked on a failed heap allocation ' +
+        'and stopped yielding within the 90-second watchdog window (8 seconds on RP2040/RP2350). ' +
         'Remedies: disable unused modules (Store & Forward, Detection Sensor, MQTT bridging), ' +
         'use a device with PSRAM, or reduce the node DB size. ' +
         (s.psramTotal ? `This device has PSRAM (${Math.round(s.psramTotal / 1024)} KB total); ` +
@@ -170,10 +172,10 @@ export function renderDiagnosis(s: DeviceSummary): string {
         'Common crash sites: heap corruption, null pointer dereference, stack overflow.'});
   }
   if (s.taskWatchdogTriggered) {
-    crit.push({title: 'Task watchdog fired — firmware stopped responding for ≥5 seconds',
+    crit.push({title: 'Task watchdog fired — firmware stopped responding for ≥90 seconds',
       detail: (s.watchdogTask ? `Starved task: "${s.watchdogTask}". ` : '') +
-        'The ESP-IDF task watchdog timer (default 5 s) fires when no monitored task ' +
-        'yields to the idle task within the window. ' +
+        'The application watchdog is set to 90 seconds on ESP32 and NRF52 (8 seconds on RP2040/RP2350). ' +
+        'It fires when no monitored task yields to the idle task within that window. ' +
         'Causes: infinite loop in radio or mesh processing, mutex deadlock, ' +
         'blocking I2C/SPI call that never returns, or heap allocation stall.'});
   }
@@ -280,7 +282,7 @@ export function renderDiagnosis(s: DeviceSummary): string {
   const gpsDisabled = s.gpsUserMode === 'DISABLED';
   if (!gpsDisabled) {
     if (s.gpsChipModel && s.gpsLocksAcquired === 0 && s.gpsSearchFailures > 0 &&
-        gpsChecksums <= 5 && s.gpsFrameErrors <= 3) {
+        gpsChecksums <= 5) {
       const gpsSats = s.gpsSiv ?? s.gpsSats;
       const hint = gpsSats !== undefined && gpsSats < 4 ?
         `Only ${gpsSats} satellite${gpsSats !== 1 ? 's' : ''} visible — ` +
@@ -329,12 +331,12 @@ export function renderDiagnosis(s: DeviceSummary): string {
         'destination node unreachable or in CLIENT_MUTE role, ' +
         'or channel congestion causing the ACK to collide on the return path.'});
   }
-  if (s.heapFree !== undefined && s.heapFree < 20000 && !s.taskWatchdogTriggered) {
+  if (s.heapFree !== undefined && s.heapFree < 40000 && !s.taskWatchdogTriggered) {
     const pct = s.heapTotal ? ` (${Math.round((s.heapFree / s.heapTotal) * 100)}%)` : '';
     warn.push({title: `Very low heap memory (${Math.round(s.heapFree / 1024)} KB free${pct})`,
-      detail: `Firmware minimum safe threshold is 1.5 KB (MINIMUM_SAFE_FREE_HEAP in configuration.h); ` +
-        'below that the NodeDB stops accepting new nodes to prevent heap exhaustion. ' +
-        'At these levels the device may drop packets or crash. ' +
+      detail: `Documented firmware cutoffs: HTTPS processing is skipped below 40 KB; ` +
+        'the NodeDB stops accepting new nodes below 1.5 KB (MINIMUM_SAFE_FREE_HEAP in configuration.h). ' +
+        'At these levels the device may silently drop features or crash. ' +
         'Disable unused modules, or use a device with PSRAM ' +
         '(task stacks can be placed in external RAM to free internal heap).'});
   }
@@ -440,9 +442,13 @@ export function renderDiagnosis(s: DeviceSummary): string {
   }
   if (s.agcCalibFailures > 3 && !hasSpiErrors(s)) {
     warn.push({title: `AGC calibration failures (${s.agcCalibFailures})`,
-      detail: 'The SX126x automatic-gain-control did not complete calibration within the timeout. ' +
-        'Occasional failures are normal (1–3 per session); repeated failures suggest ' +
-        'power-rail noise, SPI instability, or a radio module in a marginal state.'});
+      detail: 'Every 60 seconds the firmware sends CALIBRATE_ALL (0x7F) to the SX126x and waits ' +
+        'up to 50 ms for the BUSY pin to go low. Each of these events means that wait timed out — ' +
+        'the remaining calibration steps were skipped for that cycle. ' +
+        'The SX126x BUSY pin is driven by the radio chip itself, so a timeout points to ' +
+        'the chip being slow to respond: power-rail noise during the calibration burst, ' +
+        'a marginal SPI connection, or a radio module in a degraded state. ' +
+        'Correlate with RadioLib SPI-class errors to confirm bus instability.'});
   }
   if (s.nvsUsed !== undefined && s.nvsFree !== undefined && (s.nvsUsed + s.nvsFree) > 0) {
     const nvsTotal = s.nvsUsed + s.nvsFree;
