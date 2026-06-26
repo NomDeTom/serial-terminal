@@ -19,6 +19,7 @@ import {
 } from './logSummary';
 import {parseLog as parseSensorLog, toSeries, renderTelemetryCharts} from './sensorTelemetry';
 import {renderDiagnosis} from './diagnosis';
+import {flushMultiLine} from './multiLineMatch';
 import {initDeviceInfo} from './deviceInfo';
 
 declare class PortOption extends HTMLOptionElement {
@@ -647,6 +648,9 @@ async function loadFileInto(file: File): Promise<void> {
       // Yield so the browser can paint the progress bar between chunks.
       await new Promise((r) => requestAnimationFrame(r));
     }
+    // Finalise any multi-line event still pending at end-of-stream.
+    flushMultiLine(fileSession.summary);
+    flushMultiLine(fileSession.cumulative);
     // Bulk load deferred per-line rendering — refresh the panels once now.
     refreshSummary(fileSession);
     refreshDiagnosis(fileSession);

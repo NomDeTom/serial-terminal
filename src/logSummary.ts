@@ -1,6 +1,7 @@
 import {lookupDevice, lookupDeviceByModel} from './deviceInfo';
 import {lookupReleaseDate} from './firmwareReleases';
 import {publicChannelHint} from './channelHashNames';
+import {MultiLineState, createMultiLineState, feedMultiLine} from './multiLineMatch';
 
 // Routing.Error enum from meshtastic/protobufs mesh.proto
 const NAK_ERROR_NAMES: Record<number, string> = {
@@ -404,6 +405,25 @@ export interface DeviceSummary {
   positionZeroSkipped: number;
   detectionMisconfigured?: boolean;
   femLnaUnsupported?: boolean;
+
+  // ── Multi-line / correlated events (multiLineMatch.ts) ─────────────────────
+  // Traceroute results (M1) — one logical event per "Route traced:" + route lines.
+  traceroutes?: number;
+  tracerouteLastHops?: number;
+  tracerouteMaxHops?: number;
+  tracerouteWorstSnr?: number;     // weakest per-hop SNR seen (dB)
+  tracerouteHopSnrs: number[];     // every per-hop SNR collected (dB)
+  // NodeDB / prefs write failure (M2) — four loose ERROR lines correlated into one.
+  nodeDbWriteFailures?: number;
+  nodeDbWriteFailure?: {
+    cause?: string;                // nanopb error from "can't encode protobuf …" (e.g. "invalid utf8")
+    retried: boolean;              // saw "Failed to save to disk, retrying"
+    cantWritePrefs: boolean;       // saw "Can't write prefs!"
+    critCode?: number;             // FLASH_CORRUPTION critical-error code (12/13) if part of the cluster
+  };
+
+  // Transient multi-line matcher state (not displayed; reset on boot).
+  _ml: MultiLineState;
 }
 
 export function emptySummary(): DeviceSummary {
@@ -446,6 +466,8 @@ export function emptySummary(): DeviceSummary {
     _rxHashById: {}, _seenPacketIds: new Set(),
     seenNodes: {},
     nodeCountHistory: [],
+    tracerouteHopSnrs: [],
+    _ml: createMultiLineState(),
   };
 }
 
@@ -2014,6 +2036,7 @@ export function updateSummary(line: string, summary: DeviceSummary): void {
   for (const matcher of MATCHERS) {
     matcher(line, summary);
   }
+  feedMultiLine(line, summary);
 }
 
 export function updateSummaryCumulative(line: string, s: DeviceSummary): void {
@@ -2021,6 +2044,7 @@ export function updateSummaryCumulative(line: string, s: DeviceSummary): void {
   for (const matcher of MATCHERS.slice(1)) {
     matcher(line, s);
   }
+  feedMultiLine(line, s);
 }
 
 // ── Rendering helpers ──────────────────────────────────────────────────────────
@@ -2413,6 +2437,18 @@ export function renderSummary(s: DeviceSummary): string {
     const from = s.lastMessageFrom ? ` <span style="color:var(--muted)">from ${s.lastMessageFrom}</span>` : '';
     modRows.push(['Last msg', s.lastMessage + from,
       'Last decryptable text message received in this log session']);
+  }
+
+  if (s.traceroutes) {
+    const hops = s.tracerouteLastHops !== undefined ?
+      `${s.tracerouteLastHops} hop${s.tracerouteLastHops === 1 ? '' : 's'}` : '';
+    const peak = (s.tracerouteMaxHops ?? 0) > (s.tracerouteLastHops ?? 0) ?
+      ` <span style="color:var(--muted)">(max ${s.tracerouteMaxHops})</span>` : '';
+    const snr = s.tracerouteWorstSnr !== undefined ?
+      ` <span style="color:var(--muted)">worst ${s.tracerouteWorstSnr.toFixed(2)} dB</span>` : '';
+    const count = s.traceroutes > 1 ? ` ×${s.traceroutes}` : '';
+    modRows.push(['Traceroute', `${hops}${peak}${snr}${count}`,
+      'Routes reassembled from "Route traced:" + the prefix-less hop line(s) that follow it']);
   }
 
   // ── Events / errors ──────────────────────────────────────────────────────────

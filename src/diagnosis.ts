@@ -104,6 +104,39 @@ export function renderDiagnosis(s: DeviceSummary): string {
         'Fix: full chip erase + reflash — partial reflash skipping the FS partition will not repair the orphan.'});
   }
 
+  // NodeDB / prefs write failure — correlated from the multi-line cluster
+  // (encode error + "Can't write prefs!" + "Failed to save to disk, retrying" +
+  // FLASH_CORRUPTION critical error). One root cause, not four loose counters.
+  if (s.nodeDbWriteFailure) {
+    const f = s.nodeDbWriteFailure;
+    const n = s.nodeDbWriteFailures ?? 1;
+    const unrecoverable = f.critCode === 13;
+    const utf8 = f.cause ? /utf8/i.test(f.cause) : false;
+    const causeText = utf8 ?
+      'A peer sent a node name/info packet with invalid UTF-8, so the NodeDB protobuf ' +
+        'could not be serialised' :
+      f.cause ?
+        `Protobuf encoding failed (${f.cause})` :
+        'A persisted protobuf could not be written to flash';
+    const outcome = f.critCode !== undefined ?
+      ` Flash reformat + retry was attempted and the firmware recorded ${critFmt(f.critCode)}.` :
+      f.retried ? ' Flash reformat + retry was attempted.' : '';
+    const finding = {
+      title: `NodeDB save failed — settings not persisted${n > 1 ? ` (${n}×)` : ''}` +
+        (unrecoverable ? ' [unrecoverable]' : ''),
+      detail: `${causeText}, so the save aborted` +
+        (f.cantWritePrefs ? ' ("Can\'t write prefs!")' : '') + '.' + outcome + ' ' +
+        (utf8 ?
+          'The node list is rebuilt from heard packets on every reboot; the offending node ' +
+          'can be found by unusual characters in its name. Known firmware issue — no action ' +
+          'until an upstream fix.' :
+          'Recurring flash-corruption writes point to a worn or failing FS partition; a full ' +
+          'chip erase + reflash is the most reliable fix.'),
+    };
+    if (unrecoverable) crit.push(finding);
+    else diag.push(finding);
+  }
+
   // Radio SPI bus instability
   if (hasSpiErrors(s) && (s.radioRecoveryReboot || s.agcCalibFailures > 3)) {
     const spiCount = s.radioLibErrors.filter((e) => [-16, -705, -706, -707].includes(e.code)).length;
@@ -215,8 +248,9 @@ export function renderDiagnosis(s: DeviceSummary): string {
 
   // ── WARNING ────────────────────────────────────────────────────────────────
 
-  // protoEncodeErrors — nodeDB silently not persisted (from findings-2026-06-20 §8)
-  if (s.protoEncodeErrors > 0) {
+  // protoEncodeErrors — nodeDB silently not persisted (from findings-2026-06-20 §8).
+  // Suppressed when the correlated NodeDB-write-failure finding already explains it.
+  if (s.protoEncodeErrors > 0 && !s.nodeDbWriteFailure) {
     warn.push({title: `NodeDB save blocked by invalid UTF-8 in received node name (${s.protoEncodeErrors}×)`,
       detail: 'A neighbouring node sent a name or info packet with invalid UTF-8 bytes — ' +
         'common with third-party Meshtastic clients that do not validate string encoding. ' +
