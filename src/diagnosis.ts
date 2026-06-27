@@ -93,6 +93,55 @@ export function renderDiagnosis(s: DeviceSummary): string {
   // ── DIAGNOSIS — compound root-cause conclusions ────────────────────────────
   // These fire when multiple signals converge on a single confident root cause.
 
+  // Radio wiring faults (DIY/promicro builds). Validated against the SX1262 pin-pull
+  // corpus (2026-06-26): each break has a distinct signature, except that a broken
+  // NSS/SCK/MOSI/MISO/NRST all collapse to the same "chip not found" result — the
+  // firmware genuinely cannot tell them apart.
+
+  // (1) Radio not detected — chip absent or SPI/control wiring broken.
+  // Signature: the fitted radio's driver logged "No <chip> radio with TCXO/XTAL" and no
+  // driver ever reached init success. The -2 (CHIP_NOT_FOUND) results from the other
+  // built-in drivers (RF95, LR11x0, LR20x0) are expected — only one radio is fitted.
+  if (s.configuredRadioNotFound && !s.radioInitSucceeded) {
+    const chip = s.configuredRadioMissingName ?? 'radio';
+    diag.push({title: `Radio not detected — ${chip} did not respond on the SPI bus`,
+      detail: 'The firmware probed every radio driver it was built with; none found the fitted ' +
+        'radio. (The CHIP_NOT_FOUND / -2 results for the other drivers are normal — only one radio ' +
+        'is fitted.) The configured chip returned chip-not-found on both TCXO and XTAL attempts, so ' +
+        'the MCU could not read it back over SPI. On a DIY/promicro build this usually means a broken ' +
+        'connection on a radio control line rather than a dead chip: NSS/CS, SCK, MOSI, MISO, or NRST ' +
+        '(reset) — all five produce this identical signature, so check continuity on each, plus the ' +
+        'radio 3V3 and GND. A genuinely absent or dead module looks the same.'});
+  }
+
+  // (2) Radio IRQ line (DIO1) not firing. Signature: init succeeded but channel-activity
+  // scans (CAD / scanChannel) keep timing out — CAD-done is signalled over DIO1.
+  if (s.radioInitSucceeded && s.scanChannelFailures >= 2) {
+    diag.push({title: 'Radio interrupt line (DIO1/IRQ) not firing — channel scans time out',
+      detail: `The radio initialised correctly but ${s.scanChannelFailures} channel-activity scan` +
+        `${s.scanChannelFailures !== 1 ? 's' : ''} (scanChannel/CAD) returned err=-1. CAD completion ` +
+        'is delivered to the MCU over the radio interrupt line (DIO1, shown as the "irq" pin in the ' +
+        'SX126xInterface log). With that line broken the chip runs the scan but the MCU never sees the ' +
+        'done-interrupt, so it times out: the radio still configures over SPI (init succeeds) and TX ' +
+        'may appear to "complete" by timeout, but listen-before-talk is dead and received packets are ' +
+        'missed. Check continuity of the DIO1/IRQ wire. Left unfixed this escalates to SPI command ' +
+        'errors (-705/-707) as driver and chip fall out of sync.'});
+  }
+
+  // (3) Radio BUSY line stuck — TX-hang reboot loop. Signature: init succeeded, packets were
+  // enqueued, but none ever keyed up, and the device rebooted repeatedly. Every SPI command
+  // waits for BUSY to go low first; a broken BUSY wedges that wait until the watchdog resets.
+  if (s.radioInitSucceeded && s.boots >= 2 && s.txEnqueued > 0 && s.txCompleted === 0) {
+    diag.push({title: 'Radio BUSY line stuck — device reboot-loops on first transmit',
+      detail: `The radio initialised successfully and ${s.txEnqueued} packet` +
+        `${s.txEnqueued !== 1 ? 's were' : ' was'} queued for transmit, but not one transmission ever ` +
+        `started or completed, and the device rebooted ${s.boots} times. Before every SPI command the ` +
+        'SX126x driver waits for the chip BUSY line to go low; if that line is broken (or stuck high) ' +
+        'the wait never returns, the radio task hangs, and the watchdog resets the board — so every ' +
+        'boot dies at the first TX. Check continuity of the BUSY wire (the "busy" pin in the ' +
+        'SX126xInterface log). A chip that never releases BUSY looks the same.'});
+  }
+
   // Storage write-interrupt loop (from diagnosis-2026-06-20-config-persistence.md)
   if (s.fsOrphan && s.missingCriticalPrefs.length > 0) {
     diag.push({title: 'Config-loss loop: storage writes interrupted by reboots',
@@ -242,7 +291,9 @@ export function renderDiagnosis(s: DeviceSummary): string {
         'Settings applied via app will save, but if the filesystem is in a corrupt cycle ' +
         '(see DIAGNOSIS above) they will be lost again on the next reboot.'});
   }
-  if (s.radioInitError) {
+  // Suppressed when "Radio not detected" already fired: there, the -707 retries come from the
+  // other (unfitted) drivers probing a bus with no chip, so this generic line would mislead.
+  if (s.radioInitError && !s.configuredRadioNotFound) {
     crit.push({title: 'Radio failed to initialise', detail: s.radioInitError});
   }
 

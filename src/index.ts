@@ -475,7 +475,7 @@ function refreshDiagnosis(s: Session): void {
   if (!diagnosisEl || s !== active) return;
   const html = renderDiagnosis(s.showAllBoots ? s.cumulative : s.summary);
   diagnosisEl.innerHTML = html;
-  const hasAlerts = html.includes('diag-crit') || html.includes('diag-warn');
+  const hasAlerts = html.includes('diag-diag') || html.includes('diag-crit') || html.includes('diag-warn');
   diagnosisDotEl?.classList.toggle('visible', hasAlerts);
 }
 

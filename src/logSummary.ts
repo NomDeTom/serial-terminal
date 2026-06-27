@@ -41,6 +41,7 @@ export interface NodeStats {
   channels: Record<string, number>; // channel hash → heard count
   lastRssi?: number;
   lastSnr?: number;
+  lastChannelIndex?: number;         // channel slot 0-7 from the last decoded packet
 }
 
 export interface DeviceSummary {
@@ -288,6 +289,13 @@ export interface DeviceSummary {
   // Radio driver health (source-derived)
   radioInitRetries: number;
   radioInitError?: string;
+  radioInitSucceeded?: boolean;       // a radio driver reported "init success" / "init result 0"
+  configuredRadioNotFound?: boolean;  // "No <chip> radio with TCXO/XTAL" — fitted radio never answered
+  configuredRadioMissingName?: string; // chip name from that line (e.g. "SX1262")
+  scanChannelFailures: number;        // "scanChannel RadioLib err=" — CAD never completes (DIO1/IRQ)
+  boots: number;                      // count of S:B boot lines (cumulative: reboot-loop detection)
+  txEnqueued: number;                 // "enqueue for send (" — packets handed to the radio
+  txCompleted: number;                // "Started Tx (" / "Completed sending (" — TX actually keyed
   radioStartReceiveErrors: number;
   lastStartReceiveError?: string;
   radioLibErrors: Array<{radio: string; op: string; code: number}>;
@@ -440,6 +448,7 @@ export function emptySummary(): DeviceSummary {
     missingCriticalPrefs: [], missingPrefs: [],
     assertLocations: [], criticalErrors: [], radioLibErrors: [], powerChipFailures: [],
     radioInitRetries: 0, radioStartReceiveErrors: 0,
+    scanChannelFailures: 0, boots: 0, txEnqueued: 0, txCompleted: 0,
     startTransmitFailures: 0, missedTxDone: 0, missedRxDone: 0,
     rxInterruptWrongMode: 0, loraErrorRecoveries: 0,
     busyTxCount: 0, fromRadioQOverflow: 0, retransmissions: 0,
@@ -469,6 +478,16 @@ export function emptySummary(): DeviceSummary {
     tracerouteHopSnrs: [],
     _ml: createMultiLineState(),
   };
+}
+
+// The channel *index* (0-7) is printed on "decoded message" lines. printPacket()
+// historically renders it as hex with a redundant prefix ("Ch=0x0%x" → "Ch=0x5");
+// a proposed firmware change prints it as a plain decimal ("Ch=5"). Identify the
+// value from its local context — a leading 0x means hex, bare digits mean decimal —
+// so either format parses to the same number. (The channel *hash* on Lora RX /
+// "Completed sending" lines is a separate field and stays hex.)
+function parseChannelIndex(raw: string): number {
+  return /^0x/i.test(raw) ? parseInt(raw, 16) : parseInt(raw, 10);
 }
 
 // Append an online/total node-count sample, skipping consecutive duplicates and
@@ -528,7 +547,10 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/(\w+) init result (-?\d+)/);
     if (!m) return;
-    if (Number(m[2]) === 0) s.radioType = s.radioType ?? m[1];
+    if (Number(m[2]) === 0) {
+      s.radioType = s.radioType ?? m[1];
+      s.radioInitSucceeded = true;
+    }
   },
 
   // "LR11x0Interface" creation log
@@ -543,7 +565,10 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // "LR2021 init success" — after LR20x0 init result 0
   (line, s) => {
-    if (/LR2021 init success/.test(line)) s.radioType = 'LR2021';
+    if (/LR2021 init success/.test(line)) {
+      s.radioType = 'LR2021';
+      s.radioInitSucceeded = true;
+    }
   },
 
   // "LR11x0 Device 1, HW 34, FW 3.7, …"
@@ -563,6 +588,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const m = line.match(/(SX\w+) init success(?:, (TCXO|XTAL))?(?:, Vref ([\d.]+)V)?/);
     if (m) {
       s.radioType = m[1];
+      s.radioInitSucceeded = true;
       if (m[2]) s.radioTcxo = m[2];
       if (m[3]) s.radioVref = `${Number(m[3]).toFixed(1)}V`;
     }
@@ -1211,6 +1237,40 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     s.radioInitRetries++;
     s.radioInitError = m[2] ?? m[3]; // group2 = TCXO branch; group3 = numeric-code branch
     if (m[2] !== undefined) s.tcxoInitFailed = true;
+  },
+
+  // "No SX1262 radio with TCXO, Vref 1.800000V" / "No SX1262 radio with XTAL, Vref 0.0V"
+  // The fitted radio's own driver gave up after every init attempt — it never answered on
+  // the SPI bus. Distinct from the expected "No RF95 radio" probe (other drivers built in
+  // but not fitted), which has no "with TCXO/XTAL" suffix.
+  (line, s) => {
+    const m = line.match(/No (\S+) radio with (?:TCXO|XTAL)/);
+    if (!m) return;
+    s.configuredRadioNotFound = true;
+    s.configuredRadioMissingName = s.configuredRadioMissingName ?? m[1];
+  },
+
+  // "[RadioIf] SX126X scanChannel RadioLib err=-1" — channel-activity (CAD) scan never
+  // completes. CAD completion is delivered over the radio IRQ line (DIO1).
+  (line, s) => {
+    if (/scanChannel RadioLib err=/.test(line)) s.scanChannelFailures++;
+  },
+
+  // Count boot banners (S:B line). On the per-boot summary applyBootLine resets state and
+  // this then re-counts to 1; on the cumulative summary it accumulates → reboot-loop signal.
+  (line, s) => {
+    if (/S:B:\d+,/.test(line)) s.boots++;
+  },
+
+  // "enqueue for send (" — a packet was handed to the radio for transmission.
+  (line, s) => {
+    if (/enqueue for send \(/.test(line)) s.txEnqueued++;
+  },
+
+  // "Started Tx (" / "Completed sending (" — the radio actually keyed up. If packets are
+  // enqueued but this never happens, TX is wedged (e.g. BUSY line stuck).
+  (line, s) => {
+    if (/Started Tx \(|Completed sending \(/.test(line)) s.txCompleted++;
   },
 
   // "[RadioIf] StartReceive error: -N"
@@ -2002,8 +2062,9 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // #204 Packet decoded by Router — count per channel-hash byte and update per-node decoded.
   // Source: Router.cpp emits "decoded message (id=0xNN …)" on successful decrypt.
-  // The Ch= in this line is the channel *index*, not the hash, so we look up
-  // the hash from the earlier "Lora RX" line via the shared packet id.
+  // The Ch= on this line is the channel *index* (0-7), not the hash, so we look up
+  // the hash from the earlier "Lora RX" line via the shared packet id. The index is
+  // captured separately (parseChannelIndex tolerates the hex and decimal print forms).
   (line, s) => {
     const m = line.match(/decoded message \(id=(0x[\da-fA-F]+)/);
     if (!m) return;
@@ -2014,9 +2075,13 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
       delete s._rxHashById[id];
     }
     const frM = line.match(/\bfr=(0x[\da-fA-F]+)/);
+    const chIdxM = line.match(/\bCh=(0x[\da-fA-F]+|\d+)/);
     if (frM) {
       const nodeId = frM[1].toLowerCase();
-      if (s.seenNodes[nodeId]) s.seenNodes[nodeId].decoded++;
+      if (s.seenNodes[nodeId]) {
+        s.seenNodes[nodeId].decoded++;
+        if (chIdxM) s.seenNodes[nodeId].lastChannelIndex = parseChannelIndex(chIdxM[1]);
+      }
     }
   },
 
@@ -3390,7 +3455,8 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
       `<th title="Relay-echo duplicates from this node">Dup</th>` +
       `<th title="Average hops (hopStart − HopLim)">Avg hop</th>` +
       `<th title="Minimum hops observed — 0 = direct neighbor">Min hop</th>` +
-      `<th>RSSI</th><th>SNR</th></tr>`;
+      `<th>RSSI</th><th>SNR</th>` +
+      `<th title="Channel index 0-7 from the last decoded packet">Ch#</th></tr>`;
 
     const rowsHtml = channelNodes.map(([nodeId, ns]) => {
       const chHeard = ns.channels[hash] ?? 0;
@@ -3398,10 +3464,11 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
       const min = isFinite(ns.hopMin) ? String(ns.hopMin) : '—';
       const rssi = ns.lastRssi !== undefined ? String(ns.lastRssi) : '—';
       const snr = ns.lastSnr !== undefined ? ns.lastSnr.toFixed(1) : '—';
+      const chIdx = ns.lastChannelIndex !== undefined ? String(ns.lastChannelIndex) : '—';
       return `<tr><td><code>${nodeId}</code></td>` +
         `<td>${chHeard}</td><td>${ns.decoded}</td><td>${ns.dup}</td>` +
         `<td>${avg}</td><td>${min}</td>` +
-        `<td>${rssi}</td><td>${snr}</td></tr>`;
+        `<td>${rssi}</td><td>${snr}</td><td>${chIdx}</td></tr>`;
     }).join('');
 
     sections.push(

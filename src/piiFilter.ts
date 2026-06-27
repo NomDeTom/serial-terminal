@@ -9,14 +9,23 @@ const HI0 = '\x1b[0m';
 const PH = '\x1b[33m';          // amber text — marks [REDACTED]/[NODE-N] placeholders
 const PH0 = '\x1b[0m';
 
+// A public key is logged as a run of space-separated hex byte pairs
+// ("Saved Pubkey:  45 09 24 …"). 8+ groups distinguishes it from short hex.
+const PUBKEY_RE = /((?:Saved|Incoming) Pubkey:\s+)((?:[0-9a-fA-F]{2}\s+){7,}[0-9a-fA-F]{2})/g;
+
 export class PiiFilter {
   enabled = false;
   private nodeMap = new Map<string, string>();
   private counter = 0;
+  private keyMap = new Map<string, string>();
+  private keyCounter = 0;
 
   filter(text: string): string {
     if (!this.enabled) return text;
     return text
+    // Public keys (Curve25519, 32 bytes) → [PUBKEY-N]. Done first so the
+    // node-ID rules below never nibble at the key's hex bytes.
+        .replace(PUBKEY_RE, (_, lbl, hex) => `${lbl}[${this.pubAlias(hex)}]`)
     // Node IDs with 0x or ! prefix → [NODE-N]
         .replace(/(?:0x|!)([0-9a-fA-F]{8})/gi, (_, hex) => `[${this.alias(hex)}]`)
     // Node IDs with @ prefix (pos@XXXXXXXX) → @[NODE-N]
@@ -39,6 +48,7 @@ export class PiiFilter {
   // to show what would be redacted. Call this on the already-colorized line.
   annotate(text: string): string {
     return text
+        .replace(PUBKEY_RE, (_, lbl, hex) => `${lbl}${HI}${hex}${HI0}`)
         .replace(/(?:0x|!)([0-9a-fA-F]{8})/gi, `${HI}$&${HI0}`)
         .replace(/@([0-9a-fA-F]{8})/gi, `@${HI}$1${HI0}`)
         .replace(/\bnode=([0-9a-fA-F]{8})\b/gi, `node=${HI}$1${HI0}`)
@@ -53,7 +63,7 @@ export class PiiFilter {
   // Wraps [REDACTED]/[NODE-N] placeholders in amber — used when PII is ON.
   highlightPlaceholders(text: string): string {
     return text.replace(
-        /\[(NODE-\d+|BROADCAST|NULL|REDACTED)\]/g,
+        /\[(NODE-\d+|PUBKEY-\d+|BROADCAST|NULL|REDACTED)\]/g,
         `${PH}$&${PH0}`,
     );
   }
@@ -67,9 +77,22 @@ export class PiiFilter {
     return this.nodeMap.get(key)!;
   }
 
+  // Stable alias for a public key — keeps distinct keys distinguishable in the
+  // redacted output (so "same key seen twice" is still visible) without
+  // exposing the key itself. Normalised on whitespace so spacing can't fork it.
+  private pubAlias(hex: string): string {
+    const key = hex.replace(/\s+/g, '').toLowerCase();
+    if (!this.keyMap.has(key)) {
+      this.keyMap.set(key, `PUBKEY-${++this.keyCounter}`);
+    }
+    return this.keyMap.get(key)!;
+  }
+
   // Call on disconnect/clear so node numbering resets
   reset(): void {
     this.nodeMap.clear();
     this.counter = 0;
+    this.keyMap.clear();
+    this.keyCounter = 0;
   }
 }

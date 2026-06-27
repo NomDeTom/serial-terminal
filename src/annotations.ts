@@ -109,6 +109,23 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── Boot / radio faults ────────────────────────────────────────────────────
   {
+    id: 'radio-not-found', section: '§wiring', severity: 'error',
+    test: /No \S+ radio with (?:TCXO|XTAL)/,
+    title: 'Radio not detected',
+    comment: 'The fitted radio did not answer on the SPI bus on this init attempt. Unlike the ' +
+      '"No RF95 radio" probe line (a built-in driver for a chip that simply is not fitted), this is ' +
+      'the configured radio failing. If no driver reaches "init success", the chip is absent/dead or ' +
+      'a control line (NSS, SCK, MOSI, MISO, NRST) is broken — these are indistinguishable in the log.',
+  },
+  {
+    id: 'scan-channel-fail', section: '§wiring', severity: 'error',
+    test: /scanChannel RadioLib err=/,
+    title: 'CAD scan failed (IRQ?)',
+    comment: 'A channel-activity (CAD) scan never completed. CAD-done is signalled over the radio ' +
+      'interrupt line (DIO1/IRQ). Repeated failures with a radio that initialised fine point to a ' +
+      'broken DIO1/IRQ wire — listen-before-talk is dead and incoming packets are missed.',
+  },
+  {
     id: 'task-wdt-oom', section: '§oom', severity: 'error',
     test: /task_wdt: Task watchdog got triggered/,
     title: 'Crash: Task WDT / OOM',
