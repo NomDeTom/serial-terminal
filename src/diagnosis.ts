@@ -1,4 +1,4 @@
-import { DeviceSummary } from './logSummary';
+import { DeviceSummary } from './deviceSummary';
 
 interface Finding {
   title: string;

@@ -19,7 +19,7 @@
 // cumulative summary track independently and a boot reset wipes it for free.
 
 import {parseLine} from './logParser';
-import type {DeviceSummary} from './logSummary';
+import type {DeviceSummary} from './deviceSummary';
 
 // A line is a continuation when it carries no recognised log prefix
 // (LEVEL | TIME UPTIME [Module] …). parseLine returns an empty level AND module

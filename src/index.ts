@@ -12,11 +12,12 @@ import {serial as polyfill, SerialPort as SerialPortPolyfill} from 'web-serial-p
 import {PiiFilter} from './piiFilter';
 import {parseLine, colorize, preprocessLine} from './logParser';
 import {annotateLine, Annotation} from './annotations';
+import {DeviceSummary, emptySummary} from './deviceSummary';
+import {updateSummary, updateSummaryCumulative} from './logSummary';
 import {
-  DeviceSummary, emptySummary, updateSummary, updateSummaryCumulative,
   renderSummary, renderHopChart, renderChannelHashChart, renderNodeStatusTile,
   renderNodeCountChart, renderSeenNodesTable,
-} from './logSummary';
+} from './summaryRenderer';
 import {parseLog as parseSensorLog, toSeries, renderTelemetryCharts} from './sensorTelemetry';
 import {renderDiagnosis} from './diagnosis';
 import {flushMultiLine} from './multiLineMatch';
