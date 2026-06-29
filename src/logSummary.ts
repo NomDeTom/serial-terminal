@@ -1,34 +1,71 @@
-import {lookupDevice, lookupDeviceByModel} from './deviceInfo';
-import {lookupReleaseDate} from './firmwareReleases';
-import {publicChannelHint} from './channelHashNames';
-import {MultiLineState, createMultiLineState, feedMultiLine} from './multiLineMatch';
+import { lookupDevice, lookupDeviceByModel } from './deviceInfo';
+import { lookupReleaseDate } from './firmwareReleases';
+import { publicChannelHint } from './channelHashNames';
+import { MultiLineState, createMultiLineState, feedMultiLine } from './multiLineMatch';
 
-// Routing.Error enum from meshtastic/protobufs mesh.proto
+// Routing.Error enum from meshtastic/protobufs mesh.proto (mesh.pb.h)
 const NAK_ERROR_NAMES: Record<number, string> = {
-  1: 'NO_ROUTE', 2: 'GOT_NAK', 3: 'TIMEOUT', 4: 'NO_INTERFACE',
-  5: 'MAX_RETRANSMIT', 6: 'NO_CHANNEL', 7: 'TOO_LARGE',
-  8: 'NO_RESPONSE', 9: 'DUTY_CYCLE_LIMIT',
+  1: 'NO_ROUTE',
+  2: 'GOT_NAK',
+  3: 'TIMEOUT',
+  4: 'NO_INTERFACE',
+  5: 'MAX_RETRANSMIT',
+  6: 'NO_CHANNEL',
+  7: 'TOO_LARGE',
+  8: 'NO_RESPONSE',
+  9: 'DUTY_CYCLE_LIMIT',
+  32: 'BAD_REQUEST',
+  33: 'NOT_AUTHORIZED',
+  34: 'PKI_FAILED',
+  35: 'PKI_UNKNOWN_PUBKEY',
+  36: 'ADMIN_BAD_SESSION_KEY',
+  37: 'ADMIN_PUBLIC_KEY_UNAUTHORIZED',
+  38: 'RATE_LIMIT_EXCEEDED',
+  39: 'PKI_SEND_FAIL_PUBLIC_KEY',
 };
 
 // RadioLib error codes (TypeDef.h) — subset reachable on Meshtastic radio paths
 const RADIOLIB_ERR: Record<number, string> = {
-  [-2]: 'CHIP_NOT_FOUND', [-3]: 'MEMORY_ALLOCATION_FAILED',
-  [-4]: 'PACKET_TOO_LONG', [-5]: 'TX_TIMEOUT', [-6]: 'RX_TIMEOUT',
-  [-7]: 'CRC_MISMATCH', [-8]: 'INVALID_BANDWIDTH', [-9]: 'INVALID_SPREADING_FACTOR',
-  [-10]: 'INVALID_CODING_RATE', [-12]: 'INVALID_FREQUENCY', [-13]: 'INVALID_OUTPUT_POWER',
-  [-16]: 'SPI_WRITE_FAILED', [-18]: 'INVALID_PREAMBLE_LENGTH', [-19]: 'INVALID_GAIN',
-  [-20]: 'WRONG_MODEM', [-703]: 'INVALID_TCXO_VOLTAGE', [-704]: 'INVALID_MODULATION_PARAMETERS',
-  [-705]: 'SPI_CMD_TIMEOUT', [-706]: 'SPI_CMD_INVALID', [-707]: 'SPI_CMD_FAILED',
-  [-1300]: 'FRONTEND_CALIBRATION_FAILED', [-1301]: 'INVALID_SIDE_DETECT',
+  [-2]: 'CHIP_NOT_FOUND',
+  [-3]: 'MEMORY_ALLOCATION_FAILED',
+  [-4]: 'PACKET_TOO_LONG',
+  [-5]: 'TX_TIMEOUT',
+  [-6]: 'RX_TIMEOUT',
+  [-7]: 'CRC_MISMATCH',
+  [-8]: 'INVALID_BANDWIDTH',
+  [-9]: 'INVALID_SPREADING_FACTOR',
+  [-10]: 'INVALID_CODING_RATE',
+  [-12]: 'INVALID_FREQUENCY',
+  [-13]: 'INVALID_OUTPUT_POWER',
+  [-16]: 'SPI_WRITE_FAILED',
+  [-18]: 'INVALID_PREAMBLE_LENGTH',
+  [-19]: 'INVALID_GAIN',
+  [-20]: 'WRONG_MODEM',
+  [-703]: 'INVALID_TCXO_VOLTAGE',
+  [-704]: 'INVALID_MODULATION_PARAMETERS',
+  [-705]: 'SPI_CMD_TIMEOUT',
+  [-706]: 'SPI_CMD_INVALID',
+  [-707]: 'SPI_CMD_FAILED',
+  [-1300]: 'FRONTEND_CALIBRATION_FAILED',
+  [-1301]: 'INVALID_SIDE_DETECT',
 };
 
 // CriticalErrorCode from meshtastic/protobufs mesh.proto / mesh.pb.h
 const CRIT_ERR: Record<number, string> = {
-  0: 'NONE', 1: 'TX_WATCHDOG', 2: 'SLEEP_ENTER_WAIT', 3: 'NO_RADIO',
-  4: 'UNSPECIFIED', 5: 'UBLOX_UNIT_FAILED', 6: 'NO_AXP192',
-  7: 'INVALID_RADIO_SETTING', 8: 'TRANSMIT_FAILED', 9: 'BROWNOUT',
-  10: 'SX1262_FAILURE', 11: 'RADIO_SPI_BUG',
-  12: 'FLASH_CORRUPTION_RECOVERABLE', 13: 'FLASH_CORRUPTION_UNRECOVERABLE',
+  0: 'NONE',
+  1: 'TX_WATCHDOG',
+  2: 'SLEEP_ENTER_WAIT',
+  3: 'NO_RADIO',
+  4: 'UNSPECIFIED',
+  5: 'UBLOX_UNIT_FAILED',
+  6: 'NO_AXP192',
+  7: 'INVALID_RADIO_SETTING',
+  8: 'TRANSMIT_FAILED',
+  9: 'BROWNOUT',
+  10: 'SX1262_FAILURE',
+  11: 'RADIO_SPI_BUG',
+  12: 'FLASH_CORRUPTION_RECOVERABLE',
+  13: 'FLASH_CORRUPTION_UNRECOVERABLE',
 };
 
 export interface NodeStats {
@@ -37,11 +74,11 @@ export interface NodeStats {
   dup: number;
   hopSum: number;
   hopCount: number;
-  hopMin: number;       // Infinity until first valid hop measurement
+  hopMin: number; // Infinity until first valid hop measurement
   channels: Record<string, number>; // channel hash → heard count
   lastRssi?: number;
   lastSnr?: number;
-  lastChannelIndex?: number;         // channel slot 0-7 from the last decoded packet
+  lastChannelIndex?: number; // channel slot 0-7 from the last decoded packet
 }
 
 export interface DeviceSummary {
@@ -62,37 +99,37 @@ export interface DeviceSummary {
   radioFirmware?: string;
   radioTcxo?: string;
   radioVref?: string;
-  radioFem?: string;           // FEM chip (e.g. "SKY66122")
+  radioFem?: string; // FEM chip (e.g. "SKY66122")
   frequency?: string;
   bandwidth?: string;
   txPower?: string;
-  requestedTxPower?: string;   // "Requested Tx power: N dBm"
-  txGainDb?: string;           // "Device LoRa Tx gain: N dB"
+  requestedTxPower?: string; // "Requested Tx power: N dBm"
+  txGainDb?: string; // "Device LoRa Tx gain: N dB"
   modemPreset?: string;
   region?: string;
-  freqSlots?: number;          // numFreqSlots
-  slotBw?: string;             // slot bandwidth in kHz
-  loraBitrate?: string;        // e.g. "117 B/s"
+  freqSlots?: number; // numFreqSlots
+  slotBw?: string; // slot bandwidth in kHz
+  loraBitrate?: string; // e.g. "117 B/s"
   slotTimeMs?: number;
   preambleTimeMs?: number;
   codingRateOverride?: boolean; // default CR higher than custom setting
-  radioOscMode?: string;        // 'TCXO' / 'XTAL' / 'XTAL (fallback)'
-  tcxoInitFailed?: boolean;     // TCXO failed init, fell back to XTAL
+  radioOscMode?: string; // 'TCXO' / 'XTAL' / 'XTAL (fallback)'
+  tcxoInitFailed?: boolean; // TCXO failed init, fell back to XTAL
   tcxoFallbackToXtal?: boolean; // LR11x0/LR20x0 confirmed init success in XTAL mode
 
   // GPS hardware
   gps?: string;
-  gpsChipModel?: string;       // from cached probe
-  localLat?: number;           // millionths of degree × 10
+  gpsChipModel?: string; // from cached probe
+  localLat?: number; // millionths of degree × 10
   localLon?: number;
-  localAlt?: number;           // mm above sea level
-  gpsSiv?: number;             // satellites in view
+  localAlt?: number; // mm above sea level
+  gpsSiv?: number; // satellites in view
 
   // GPS lock acquisition / fault tracking
   gpsLockTimeSecs?: number;
   gpsLocksAcquired: number;
   gpsSearchFailures: number;
-  gpsConsecutiveLockFailures?: number;  // rising = chip can't fix; resets to 0 on lock
+  gpsConsecutiveLockFailures?: number; // rising = chip can't fix; resets to 0 on lock
   gpsNoLockPublishFailures: number;
   gpsChecksumFailDelta?: number;
   gpsChecksumFailTotal?: number;
@@ -123,8 +160,8 @@ export interface DeviceSummary {
 
   // I²C
   i2cDevices: string[];
-  accelChipId?: number;        // acc_info value
-  magChipId?: number;          // mag_info value
+  accelChipId?: number; // acc_info value
+  magChipId?: number; // mag_info value
 
   // Battery
   batteryPct?: string;
@@ -182,7 +219,7 @@ export interface DeviceSummary {
   rxBad?: number;
 
   // DeviceTelemetry extended
-  uptime?: number;             // seconds
+  uptime?: number; // seconds
   numPacketsTx?: number;
   numPacketsRx?: number;
   numPacketsRxBad?: number;
@@ -198,7 +235,7 @@ export interface DeviceSummary {
   numOnlineNodes?: number;
   numTotalNodes?: number;
   // Online/total node counts over time (deduped — one point per change)
-  nodeCountHistory: Array<{online: number; total: number}>;
+  nodeCountHistory: Array<{ online: number; total: number }>;
 
   // Packets per channel-hash byte (the "Ch=0xNN" field in printPacket lines).
   // rx = heard over the air ("Lora RX"); decoded = successfully decoded by Router; tx = transmitted.
@@ -270,35 +307,35 @@ export interface DeviceSummary {
   rtcMissing?: boolean;
 
   // Persistence / lifecycle faults
-  fsOrphan?: boolean;              // LittleFS "Found orphan" — filesystem inconsistency
-  pkiKeysRegenerated?: boolean;    // "Generate new PKI keys" — node identity/keys reset
-  factoryReset?: boolean;          // "Perform factory reset!"
-  invalidLoraConfig?: boolean;     // invalid coding_rate/spread_factor or preset invalid for region
-  missingCriticalPrefs: string[];  // persistence-critical prefs (config / nodes) that failed
-  missingPrefs: string[];          // non-critical prefs (uiconfig, cannedConf, ringtone…)
+  fsOrphan?: boolean; // LittleFS "Found orphan" — filesystem inconsistency
+  pkiKeysRegenerated?: boolean; // "Generate new PKI keys" — node identity/keys reset
+  factoryReset?: boolean; // "Perform factory reset!"
+  invalidLoraConfig?: boolean; // invalid coding_rate/spread_factor or preset invalid for region
+  missingCriticalPrefs: string[]; // persistence-critical prefs (config / nodes) that failed
+  missingPrefs: string[]; // non-critical prefs (uiconfig, cannedConf, ringtone…)
 
   // Crash / panic
   taskWatchdogTriggered?: boolean; // ESP-IDF task_wdt fired
-  watchdogTask?: string;           // starved task name (from "task_wdt:  - NAME (CPU N)")
-  espPanicBacktrace?: boolean;     // "Backtrace:" line seen
-  panicPc?: string;                // first PC from panic backtrace
+  watchdogTask?: string; // starved task name (from "task_wdt:  - NAME (CPU N)")
+  espPanicBacktrace?: boolean; // "Backtrace:" line seen
+  panicPc?: string; // first PC from panic backtrace
   radioAssertFailed?: boolean;
-  assertLocations: string[];       // "file:line" deduped list
-  criticalErrors: Array<{code: number; file: string; line: number}>;
+  assertLocations: string[]; // "file:line" deduped list
+  criticalErrors: Array<{ code: number; file: string; line: number }>;
 
   // Radio driver health (source-derived)
   radioInitRetries: number;
   radioInitError?: string;
-  radioInitSucceeded?: boolean;       // a radio driver reported "init success" / "init result 0"
-  configuredRadioNotFound?: boolean;  // "No <chip> radio with TCXO/XTAL" — fitted radio never answered
+  radioInitSucceeded?: boolean; // a radio driver reported "init success" / "init result 0"
+  configuredRadioNotFound?: boolean; // "No <chip> radio with TCXO/XTAL" — fitted radio never answered
   configuredRadioMissingName?: string; // chip name from that line (e.g. "SX1262")
-  scanChannelFailures: number;        // "scanChannel RadioLib err=" — CAD never completes (DIO1/IRQ)
-  boots: number;                      // count of S:B boot lines (cumulative: reboot-loop detection)
-  txEnqueued: number;                 // "enqueue for send (" — packets handed to the radio
-  txCompleted: number;                // "Started Tx (" / "Completed sending (" — TX actually keyed
+  scanChannelFailures: number; // "scanChannel RadioLib err=" — CAD never completes (DIO1/IRQ)
+  boots: number; // count of S:B boot lines (cumulative: reboot-loop detection)
+  txEnqueued: number; // "enqueue for send (" — packets handed to the radio
+  txCompleted: number; // "Started Tx (" / "Completed sending (" — TX actually keyed
   radioStartReceiveErrors: number;
   lastStartReceiveError?: string;
-  radioLibErrors: Array<{radio: string; op: string; code: number}>;
+  radioLibErrors: Array<{ radio: string; op: string; code: number }>;
   radioBusyTxHardwareFailure?: boolean;
   startTransmitFailures: number;
   lastStartTransmitError?: string;
@@ -352,7 +389,7 @@ export interface DeviceSummary {
   scheduledReboot?: boolean;
   scheduledRebootSecs?: number;
   enteredDfuMode?: boolean;
-  regionPresetSwap?: {preset: string; from: string; to: string};
+  regionPresetSwap?: { preset: string; from: string; to: string };
   tmFlags?: Record<string, string>;
   lastNextHopDest?: string;
   lastNextHop?: number;
@@ -367,16 +404,36 @@ export interface DeviceSummary {
   envGasResistance?: number;
   envHumidity?: number;
   envTemperature?: number;
-  pm10?: number; pm25?: number; pm100?: number;
-  co2?: number; co2Temp?: number; co2Humidity?: number;
-  hcho?: number; hchoTemp?: number; hchoHumidity?: number;
-  iaqVoltage?: number; iaq?: number; distance?: number; lux?: number;
-  soilTemp?: number; soilMoisture?: number;
-  healthTemp?: number; heartBpm?: number; spo2?: number;
+  pm10?: number;
+  pm25?: number;
+  pm100?: number;
+  co2?: number;
+  co2Temp?: number;
+  co2Humidity?: number;
+  hcho?: number;
+  hchoTemp?: number;
+  hchoHumidity?: number;
+  iaqVoltage?: number;
+  iaq?: number;
+  distance?: number;
+  lux?: number;
+  soilTemp?: number;
+  soilMoisture?: number;
+  healthTemp?: number;
+  heartBpm?: number;
+  spo2?: number;
   radiation?: number;
-  windSpeed?: number; windDir?: number; weight?: number;
-  ch1V?: number; ch1I?: number; ch2V?: number; ch2I?: number;
-  hostUptime?: number; hostDiskFree?: number; hostMemFree?: number; hostLoad?: number[];
+  windSpeed?: number;
+  windDir?: number;
+  weight?: number;
+  ch1V?: number;
+  ch1I?: number;
+  ch2V?: number;
+  ch2I?: number;
+  hostUptime?: number;
+  hostDiskFree?: number;
+  hostMemFree?: number;
+  hostLoad?: number[];
 
   // Peer telemetry (Part B #172–#176)
   peerTelemetry: Record<string, Record<string, number>>;
@@ -386,7 +443,7 @@ export interface DeviceSummary {
   telemetryDecodeErrors: Record<string, number>;
 
   // I2C sensor driver health (Part D #179–#187)
-  sensorErrors: Array<{sensor: string; op: string; code?: number}>;
+  sensorErrors: Array<{ sensor: string; op: string; code?: number }>;
   sensorsNotFound: string[];
   sensorsDropped: string[];
   sensorReadFailures: number;
@@ -394,7 +451,7 @@ export interface DeviceSummary {
   sensorFrameErrors: number;
   sensorClockConflict: string[];
   sensorCalibSaveFailed?: boolean;
-  bme680LibCode?: {sensor: string; lib: string; code: number};
+  bme680LibCode?: { sensor: string; lib: string; code: number };
 
   // Feature module diagnostics (Part E #188–#201)
   adminConfigSaveFailed?: boolean;
@@ -419,15 +476,15 @@ export interface DeviceSummary {
   traceroutes?: number;
   tracerouteLastHops?: number;
   tracerouteMaxHops?: number;
-  tracerouteWorstSnr?: number;     // weakest per-hop SNR seen (dB)
-  tracerouteHopSnrs: number[];     // every per-hop SNR collected (dB)
+  tracerouteWorstSnr?: number; // weakest per-hop SNR seen (dB)
+  tracerouteHopSnrs: number[]; // every per-hop SNR collected (dB)
   // NodeDB / prefs write failure (M2) — four loose ERROR lines correlated into one.
   nodeDbWriteFailures?: number;
   nodeDbWriteFailure?: {
-    cause?: string;                // nanopb error from "can't encode protobuf …" (e.g. "invalid utf8")
-    retried: boolean;              // saw "Failed to save to disk, retrying"
-    cantWritePrefs: boolean;       // saw "Can't write prefs!"
-    critCode?: number;             // FLASH_CORRUPTION critical-error code (12/13) if part of the cluster
+    cause?: string; // nanopb error from "can't encode protobuf …" (e.g. "invalid utf8")
+    retried: boolean; // saw "Failed to save to disk, retrying"
+    cantWritePrefs: boolean; // saw "Can't write prefs!"
+    critCode?: number; // FLASH_CORRUPTION critical-error code (12/13) if part of the cluster
   };
 
   // Transient multi-line matcher state (not displayed; reset on boot).
@@ -438,41 +495,98 @@ export function emptySummary(): DeviceSummary {
   return {
     i2cDevices: [],
     bootErrors: 0,
-    bleConnections: 0, bleDisconnections: 0, bleNvsErrors: 0, bleGattFailures: 0,
+    bleConnections: 0,
+    bleDisconnections: 0,
+    bleNvsErrors: 0,
+    bleGattFailures: 0,
     mqttErrors: 0,
-    busyRxCount: 0, dutyCycleHits: 0, nakErrors: {}, channelDecodeFailures: 0,
-    sslErrors: 0, powerLossEvents: 0, radioProbeFailures: [],
-    protoEncodeErrors: 0, radioRxErrors: 0, txRegionUnsetBlocked: 0,
-    reliableSendFailures: 0, preHopDropMissingHopStart: 0, tophoneQueueFull: 0,
-    invalidChannelIndexErrors: 0, telemetryRateLimited: 0, nodeDbFullEvictions: 0,
-    missingCriticalPrefs: [], missingPrefs: [],
-    assertLocations: [], criticalErrors: [], radioLibErrors: [], powerChipFailures: [],
-    radioInitRetries: 0, radioStartReceiveErrors: 0,
-    scanChannelFailures: 0, boots: 0, txEnqueued: 0, txCompleted: 0,
-    startTransmitFailures: 0, missedTxDone: 0, missedRxDone: 0,
-    rxInterruptWrongMode: 0, loraErrorRecoveries: 0,
-    busyTxCount: 0, fromRadioQOverflow: 0, retransmissions: 0,
-    naksReceived: 0, agcCalibFailures: 0, pkiUnknownKeyDmRefused: 0,
-    queuePushFailures: 0, safeFileWriteFailures: 0, encryptedStorageLockedSkips: 0,
-    encryptionFailures: 0, unsafePowerSaveBlocked: 0,
-    adcErrors: 0, espSleepErrors: 0, critLogCount: 0,
-    gpsLocksAcquired: 0, gpsSearchFailures: 0, gpsNoLockPublishFailures: 0,
-    gpsBufferFullEvents: 0, gpsFrameErrors: 0, gpsStaleDataEvents: 0,
-    gpsBogusValueRejects: 0, gpsConfigNacks: 0, gpsNackedMessages: [],
-    gpsConfigTimeouts: 0, gpsTimedOutMessages: [], gpsAtgmConfigFailures: 0,
-    gpsPowerStateTransitions: 0, rtcDriftCorrections: 0,
-    peerTelemetry: {}, peerTelemetryCount: 0, telemetryDecodeErrors: {},
-    sensorErrors: [], sensorsNotFound: [], sensorsDropped: [],
-    sensorReadFailures: 0, sensorChecksumFailures: 0, sensorFrameErrors: 0,
+    busyRxCount: 0,
+    dutyCycleHits: 0,
+    nakErrors: {},
+    channelDecodeFailures: 0,
+    sslErrors: 0,
+    powerLossEvents: 0,
+    radioProbeFailures: [],
+    protoEncodeErrors: 0,
+    radioRxErrors: 0,
+    txRegionUnsetBlocked: 0,
+    reliableSendFailures: 0,
+    preHopDropMissingHopStart: 0,
+    tophoneQueueFull: 0,
+    invalidChannelIndexErrors: 0,
+    telemetryRateLimited: 0,
+    nodeDbFullEvictions: 0,
+    missingCriticalPrefs: [],
+    missingPrefs: [],
+    assertLocations: [],
+    criticalErrors: [],
+    radioLibErrors: [],
+    powerChipFailures: [],
+    radioInitRetries: 0,
+    radioStartReceiveErrors: 0,
+    scanChannelFailures: 0,
+    boots: 0,
+    txEnqueued: 0,
+    txCompleted: 0,
+    startTransmitFailures: 0,
+    missedTxDone: 0,
+    missedRxDone: 0,
+    rxInterruptWrongMode: 0,
+    loraErrorRecoveries: 0,
+    busyTxCount: 0,
+    fromRadioQOverflow: 0,
+    retransmissions: 0,
+    naksReceived: 0,
+    agcCalibFailures: 0,
+    pkiUnknownKeyDmRefused: 0,
+    queuePushFailures: 0,
+    safeFileWriteFailures: 0,
+    encryptedStorageLockedSkips: 0,
+    encryptionFailures: 0,
+    unsafePowerSaveBlocked: 0,
+    adcErrors: 0,
+    espSleepErrors: 0,
+    critLogCount: 0,
+    gpsLocksAcquired: 0,
+    gpsSearchFailures: 0,
+    gpsNoLockPublishFailures: 0,
+    gpsBufferFullEvents: 0,
+    gpsFrameErrors: 0,
+    gpsStaleDataEvents: 0,
+    gpsBogusValueRejects: 0,
+    gpsConfigNacks: 0,
+    gpsNackedMessages: [],
+    gpsConfigTimeouts: 0,
+    gpsTimedOutMessages: [],
+    gpsAtgmConfigFailures: 0,
+    gpsPowerStateTransitions: 0,
+    rtcDriftCorrections: 0,
+    peerTelemetry: {},
+    peerTelemetryCount: 0,
+    telemetryDecodeErrors: {},
+    sensorErrors: [],
+    sensorsNotFound: [],
+    sensorsDropped: [],
+    sensorReadFailures: 0,
+    sensorChecksumFailures: 0,
+    sensorFrameErrors: 0,
     sensorClockConflict: [],
     configSaveFailures: 0,
-    adminDroppedStorageLocked: 0, adminNoSessionKey: 0,
-    unsignedNodeInfoDropped: 0, nodeKeyDowngrade: [],
-    keyVerificationFailures: 0, neighborDbFull: 0,
-    tracerouteHopLimitExceeded: 0, tracerouteErrors: 0, positionZeroSkipped: 0,
-    rxChannelHashCounts: {}, decodedChannelHashCounts: {}, txChannelHashCounts: {},
+    adminDroppedStorageLocked: 0,
+    adminNoSessionKey: 0,
+    unsignedNodeInfoDropped: 0,
+    nodeKeyDowngrade: [],
+    keyVerificationFailures: 0,
+    neighborDbFull: 0,
+    tracerouteHopLimitExceeded: 0,
+    tracerouteErrors: 0,
+    positionZeroSkipped: 0,
+    rxChannelHashCounts: {},
+    decodedChannelHashCounts: {},
+    txChannelHashCounts: {},
     dupChannelHashCounts: {},
-    _rxHashById: {}, _seenPacketIds: new Set(),
+    _rxHashById: {},
+    _seenPacketIds: new Set(),
     seenNodes: {},
     nodeCountHistory: [],
     tracerouteHopSnrs: [],
@@ -495,7 +609,7 @@ function parseChannelIndex(raw: string): number {
 function recordNodeCount(s: DeviceSummary, online: number, total: number): void {
   const last = s.nodeCountHistory[s.nodeCountHistory.length - 1];
   if (last && last.online === online && last.total === total) return;
-  s.nodeCountHistory.push({online, total});
+  s.nodeCountHistory.push({ online, total });
   if (s.nodeCountHistory.length > 500) s.nodeCountHistory.shift();
 }
 
@@ -509,7 +623,9 @@ function applyBootLine(line: string, s: DeviceSummary, resetOnBoot: boolean): vo
     Object.assign(s, emptySummary());
   }
   s.hwModelId = Number(m[1]);
-  s.firmware = m[2]; s.hardware = m[3]; s.buildVariant = m[4];
+  s.firmware = m[2];
+  s.hardware = m[3];
+  s.buildVariant = m[4];
   const entry = lookupDevice(m[3]) ?? lookupDeviceByModel(s.hwModelId);
   if (entry) {
     s.displayName = entry.displayName;
@@ -604,7 +720,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/Set radio: region=(\w+), name=(\w+)/);
     if (m) {
-      s.region = m[1]; s.modemPreset = m[2];
+      s.region = m[1];
+      s.modemPreset = m[2];
     }
   },
 
@@ -624,7 +741,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/Requested Tx power: (\d+) dBm; Device LoRa Tx gain: (-?\d+) dB/);
     if (m) {
-      s.requestedTxPower = m[1]; s.txGainDb = m[2];
+      s.requestedTxPower = m[1];
+      s.txGainDb = m[2];
     }
   },
 
@@ -638,7 +756,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/numFreqSlots: (\d+) x ([\d.]+)kHz/);
     if (m) {
-      s.freqSlots = Number(m[1]); s.slotBw = m[2];
+      s.freqSlots = Number(m[1]);
+      s.slotBw = m[2];
     }
   },
 
@@ -681,7 +800,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/Set local position: lat=(-?\d+) lon=(-?\d+)/);
     if (m) {
-      s.localLat = Number(m[1]); s.localLon = Number(m[2]);
+      s.localLat = Number(m[1]);
+      s.localLon = Number(m[2]);
     }
   },
 
@@ -709,7 +829,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const ma = line.match(/acc_info = (\d+)/);
     if (ma) {
-      s.accelChipId = Number(ma[1]); return;
+      s.accelChipId = Number(ma[1]);
+      return;
     }
     const mm = line.match(/mag_info = (\d+)/);
     if (mm) s.magChipId = Number(mm[1]);
@@ -736,7 +857,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     let m = line.match(/Total heap: (\d+)/);
     if (m) {
-      s.heapTotal = Number(m[1]); return;
+      s.heapTotal = Number(m[1]);
+      return;
     }
     m = line.match(/Free heap\s*[:\s]+(\d+)/i);
     if (m) s.heapFree = Number(m[1]);
@@ -746,7 +868,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     let m = line.match(/Total PSRAM: (\d+)/);
     if (m) {
-      s.psramTotal = Number(m[1]); return;
+      s.psramTotal = Number(m[1]);
+      return;
     }
     m = line.match(/Free PSRAM\s*[:\s]+(\d+)/i);
     if (m) s.psramFree = Number(m[1]);
@@ -766,7 +889,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/Filesystem files \((\d+)\/(\d+) Bytes\)/);
     if (m) {
-      s.fsUsed = Number(m[1]); s.fsTotal = Number(m[2]);
+      s.fsUsed = Number(m[1]);
+      s.fsTotal = Number(m[2]);
     }
   },
 
@@ -774,7 +898,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // Also matches older: "Loaded saved nodedatabase v25: 87 nodes"
   (line, s) => {
     const m = line.match(
-        /Loaded saved nodedatabase v(\d+): (\d+) nodes(?:, (\d+) pos, (\d+) tel, (\d+) env, (\d+) status)?/
+      /Loaded saved nodedatabase v(\d+): (\d+) nodes(?:, (\d+) pos, (\d+) tel, (\d+) env, (\d+) status)?/,
     );
     if (m) {
       s.nodeDbVersion = Number(m[1]);
@@ -790,7 +914,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     // Older format: "Loaded saved nodedatabase version N, with nodes count: N"
     const m2 = line.match(/Loaded saved nodedatabase version (\d+), with nodes count: (\d+)/);
     if (m2) {
-      s.nodeDbVersion = Number(m2[1]); s.nodeDbCount = Number(m2[2]);
+      s.nodeDbVersion = Number(m2[1]);
+      s.nodeDbCount = Number(m2[2]);
     }
   },
 
@@ -862,7 +987,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/\[RadioIf\].*rxSNR=([-\d.]+) rxRSSI=([-\d]+)/);
     if (m) {
-      s.lastSnr = m[1]; s.lastRssi = m[2];
+      s.lastSnr = m[1];
+      s.lastRssi = m[2];
     }
   },
 
@@ -876,8 +1002,10 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/txGood=(\d+),txRelay=(\d+),rxGood=(\d+),rxBad=(\d+)/);
     if (m) {
-      s.txGood = Number(m[1]); s.txRelay = Number(m[2]);
-      s.rxGood = Number(m[3]); s.rxBad = Number(m[4]);
+      s.txGood = Number(m[1]);
+      s.txRelay = Number(m[2]);
+      s.rxGood = Number(m[3]);
+      s.rxBad = Number(m[4]);
     }
   },
 
@@ -897,7 +1025,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/\[GPS\].*Sats=(\d+), GPSlock=(\d+)/);
     if (m) {
-      s.gpsSats = Number(m[1]); s.gpsLock = m[2] === '1';
+      s.gpsSats = Number(m[1]);
+      s.gpsLock = m[2] === '1';
     }
   },
 
@@ -932,7 +1061,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/num_online_nodes=(\d+), num_total_nodes=(\d+)/);
     if (m) {
-      s.numOnlineNodes = Number(m[1]); s.numTotalNodes = Number(m[2]);
+      s.numOnlineNodes = Number(m[1]);
+      s.numTotalNodes = Number(m[2]);
       recordNodeCount(s, s.numOnlineNodes, s.numTotalNodes);
     }
   },
@@ -947,8 +1077,10 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/\[HopScaling\].*hop=(\d+).*fill=(\d+%).*polite=(\d+\/\d+).*nextRoll=(\S+)/);
     if (m) {
-      s.hopLimit = Number(m[1]); s.hopFill = m[2];
-      s.hopPolite = m[3]; s.hopNextRoll = m[4];
+      s.hopLimit = Number(m[1]);
+      s.hopFill = m[2];
+      s.hopPolite = m[3];
+      s.hopNextRoll = m[4];
     }
   },
 
@@ -1012,19 +1144,24 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   (line, s) => {
     if (/MQTT configured to use client proxy/.test(line)) {
-      s.mqttProxyMode = true; return;
+      s.mqttProxyMode = true;
+      return;
     }
     if (/Connecting to MQTT server/.test(line)) {
-      s.mqttState = 'connecting'; return;
+      s.mqttState = 'connecting';
+      return;
     }
     if (/MQTT connected/.test(line)) {
-      s.mqttState = 'connected'; return;
+      s.mqttState = 'connected';
+      return;
     }
     if (/MQTT.*connection lost|MQTT.*disconnected/i.test(line)) {
-      s.mqttState = 'disconnected'; return;
+      s.mqttState = 'disconnected';
+      return;
     }
     if (/Failed to connect to MQTT|MQTT.*connect.*fail/i.test(line)) {
-      s.mqttState = 'failed'; s.mqttErrors++;
+      s.mqttState = 'failed';
+      s.mqttErrors++;
     }
   },
 
@@ -1082,8 +1219,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // Invalid LoRa config from client: "Invalid coding_rate 0", "Invalid spread_factor 0",
   // "Preset NarrowSlow invalid for UNSET", "Invalid LoRa config received from client"
   (line, s) => {
-    if (/Invalid coding_rate|Invalid spread_factor|Preset \w+ invalid for|Invalid LoRa config received/
-        .test(line)) {
+    if (/Invalid coding_rate|Invalid spread_factor|Preset \w+ invalid for|Invalid LoRa config received/.test(line)) {
       s.invalidLoraConfig = true;
     }
   },
@@ -1162,7 +1298,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/\[MeshBeaconBroadcast\] Beacon: split-B TEXT_MESSAGE_APP msg='([^']+)' from=(0x[\da-fA-F]+)/);
     if (m) {
-      s.lastBeaconMsg = m[1]; s.lastBeaconFrom = m[2];
+      s.lastBeaconMsg = m[1];
+      s.lastBeaconFrom = m[2];
     }
   },
 
@@ -1170,7 +1307,8 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/\[ServerAPI\] Received text msg from=(0x[\da-fA-F]+), id=0x[\da-fA-F]+, msg=(.+)/);
     if (m) {
-      s.lastMessageFrom = m[1]; s.lastMessage = m[2].trim();
+      s.lastMessageFrom = m[1];
+      s.lastMessage = m[2].trim();
     }
   },
 
@@ -1179,11 +1317,14 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (s.lastMessage) return; // already captured above
     const m1 = line.match(/[Rr]eceived text.*?from (0x[\da-fA-F]+)[,:]?\s*(.+)/);
     if (m1) {
-      s.lastMessageFrom = m1[1]; s.lastMessage = m1[2].trim(); return;
+      s.lastMessageFrom = m1[1];
+      s.lastMessage = m1[2].trim();
+      return;
     }
     const m2 = line.match(/\btext=([^,\n]+).*\bfrom=?(0x[\da-fA-F]+)/);
     if (m2) {
-      s.lastMessage = m2[1].trim(); s.lastMessageFrom = m2[2];
+      s.lastMessage = m2[1].trim();
+      s.lastMessageFrom = m2[2];
     }
   },
 
@@ -1221,7 +1362,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/Record critical error (\d+) at (\S+):(\d+)/);
     if (!m) return;
-    const entry = {code: Number(m[1]), file: m[2], line: Number(m[3])};
+    const entry = { code: Number(m[1]), file: m[2], line: Number(m[3]) };
     const key = `${entry.code}:${entry.file}:${entry.line}`;
     if (!s.criticalErrors.some((e) => `${e.code}:${e.file}:${e.line}` === key)) {
       s.criticalErrors.push(entry);
@@ -1230,9 +1371,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // "X init failed with -N (CODE), retrying" / "X init failed with TCXO Vref N V (err -N), retrying"
   (line, s) => {
-    const m = line.match(
-        /(\w+) init failed with (?:TCXO Vref [\d.]+ V \(err (-?\d+)\)|(-?\d+)).*retry/i
-    );
+    const m = line.match(/(\w+) init failed with (?:TCXO Vref [\d.]+ V \(err (-?\d+)\)|(-?\d+)).*retry/i);
     if (!m) return;
     s.radioInitRetries++;
     s.radioInitError = m[2] ?? m[3]; // group2 = TCXO branch; group3 = numeric-code branch
@@ -1396,7 +1535,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // "Preset X (implies region swap|swaps region) Y to Z"
   (line, s) => {
     const m = line.match(/Preset (\w+) (?:implies region swap|swaps region) (\w+) to (\w+)/);
-    if (m) s.regionPresetSwap = {preset: m[1], from: m[2], to: m[3]};
+    if (m) s.regionPresetSwap = { preset: m[1], from: m[2], to: m[3] };
   },
 
   // "[TM] Enabled: pos_dedup=N nodeinfo_resp=N …"
@@ -1422,11 +1561,9 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // Generic RadioLib op failure: "SX1262 startReceive RadioLib err=-707"
   (line, s) => {
-    const m = line.match(
-        /(SX126[0-9xX]+|LR11x0|LR2021|RF95|STM32WL|LLCC68) (\w+) RadioLib err=(-?\d+)/
-    );
+    const m = line.match(/(SX126[0-9xX]+|LR11x0|LR2021|RF95|STM32WL|LLCC68) (\w+) RadioLib err=(-?\d+)/);
     if (!m) return;
-    const entry = {radio: m[1], op: m[2], code: Number(m[3])};
+    const entry = { radio: m[1], op: m[2], code: Number(m[3]) };
     const key = `${entry.radio}:${entry.op}:${entry.code}`;
     if (!s.radioLibErrors.some((e) => `${e.radio}:${e.op}:${e.code}` === key)) {
       s.radioLibErrors.push(entry);
@@ -1481,16 +1618,14 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // CRIT-level queue-push failures (toPhone / MQTT / notification queues)
   (line, s) => {
-    if (/Failed to (?:add a message to mqttQueue|queue a (?:packet|notification) into \w+)/
-        .test(line)) {
+    if (/Failed to (?:add a message to mqttQueue|queue a (?:packet|notification) into \w+)/.test(line)) {
       s.queuePushFailures++;
     }
   },
 
   // SafeFile atomic-write integrity failure
   (line, s) => {
-    if (/Readback failed hash mismatch|Can.t open tmp file for readback|can.t rename new pref file/
-        .test(line)) {
+    if (/Readback failed hash mismatch|Can.t open tmp file for readback|can.t rename new pref file/.test(line)) {
       s.safeFileWriteFailures++;
     }
   },
@@ -1498,8 +1633,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // Encrypted storage locked — save skipped (narrow to actual save-skip lines; the boot-time
   // "Encrypted storage locked, using default config" INFO line is excluded intentionally)
   (line, s) => {
-    if (/saveToDisk.*encrypted storage locked|Config save skipped.*encrypted storage is locked/i
-        .test(line)) {
+    if (/saveToDisk.*encrypted storage locked|Config save skipped.*encrypted storage is locked/i.test(line)) {
       s.encryptedStorageLockedSkips++;
       s.storageLocked = true;
     }
@@ -1514,8 +1648,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // Storage decrypt / decode failed — treating as corrupt
   (line, s) => {
-    if (/Decrypt failed for .*treating as corrupt|decrypt\/decode failed during reload/
-        .test(line)) {
+    if (/Decrypt failed for .*treating as corrupt|decrypt\/decode failed during reload/.test(line)) {
       s.storageDecryptCorrupt = true;
     }
   },
@@ -1538,8 +1671,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // ADC init / calibration failures — unreliable battery readings
   (line, s) => {
-    if (/ADC (?:oneshot (?:init|handle)|channel config|calibration).*(?:fail|not initialized)/i
-        .test(line)) {
+    if (/ADC (?:oneshot (?:init|handle)|channel config|calibration).*(?:fail|not initialized)/i.test(line)) {
       s.adcErrors++;
     }
   },
@@ -1594,9 +1726,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // "[GPS] GPS search ended without fix after Ns (consecutive failures: N)"
   (line, s) => {
-    const m = line.match(
-        /\[GPS\] GPS search ended without fix after (\d+)s \(consecutive failures: (\d+)\)/
-    );
+    const m = line.match(/\[GPS\] GPS search ended without fix after (\d+)s \(consecutive failures: (\d+)\)/);
     if (!m) return;
     s.gpsSearchFailures++;
     s.gpsConsecutiveLockFailures = Number(m[2]);
@@ -1730,57 +1860,70 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // #161 Environment: barometric_pressure, current, gas_resistance, humidity, temperature
   (line, s) => {
     const m = line.match(
-        /Send: barometric_pressure=([\d.-]+), current=([\d.-]+), gas_resistance=([\d.-]+), relative_humidity=([\d.-]+), temperature=([\d.-]+)/
+      /Send: barometric_pressure=([\d.-]+), current=([\d.-]+), gas_resistance=([\d.-]+), relative_humidity=([\d.-]+), temperature=([\d.-]+)/,
     );
     if (!m) return;
-    s.envPressure = Number(m[1]); s.envCurrent = Number(m[2]);
-    s.envGasResistance = Number(m[3]); s.envHumidity = Number(m[4]);
+    s.envPressure = Number(m[1]);
+    s.envCurrent = Number(m[2]);
+    s.envGasResistance = Number(m[3]);
+    s.envHumidity = Number(m[4]);
     s.envTemperature = Number(m[5]);
   },
 
   // #162 Air quality: PM10 / PM2.5 / PM100
   (line, s) => {
     const m = line.match(
-        /Send: pm10_(?:standard|environmental)=(\d+), pm25_(?:standard|environmental)=(\d+), pm100_(?:standard|environmental)=(\d+)/
+      /Send: pm10_(?:standard|environmental)=(\d+), pm25_(?:standard|environmental)=(\d+), pm100_(?:standard|environmental)=(\d+)/,
     );
     if (!m) return;
-    s.pm10 = Number(m[1]); s.pm25 = Number(m[2]); s.pm100 = Number(m[3]);
+    s.pm10 = Number(m[1]);
+    s.pm25 = Number(m[2]);
+    s.pm100 = Number(m[3]);
   },
 
   // #163 CO₂ sensor
   (line, s) => {
     const m = line.match(/Send: co2=(\d+), co2_t=([\d.-]+), co2_rh=([\d.-]+)/);
     if (!m) return;
-    s.co2 = Number(m[1]); s.co2Temp = Number(m[2]); s.co2Humidity = Number(m[3]);
+    s.co2 = Number(m[1]);
+    s.co2Temp = Number(m[2]);
+    s.co2Humidity = Number(m[3]);
   },
 
   // #164 HCHO / VOC sensor
   (line, s) => {
     const m = line.match(/Send: hcho=([\d.-]+), hcho_t=([\d.-]+), hcho_rh=([\d.-]+)/);
     if (!m) return;
-    s.hcho = Number(m[1]); s.hchoTemp = Number(m[2]); s.hchoHumidity = Number(m[3]);
+    s.hcho = Number(m[1]);
+    s.hchoTemp = Number(m[2]);
+    s.hchoHumidity = Number(m[3]);
   },
 
   // #165 Light / IAQ
   (line, s) => {
     const m = line.match(/Send: voltage=([\d.-]+), IAQ=(\d+), distance=([\d.-]+), lux=([\d.-]+)/);
     if (!m) return;
-    s.iaqVoltage = Number(m[1]); s.iaq = Number(m[2]);
-    s.distance = Number(m[3]); s.lux = Number(m[4]);
+    s.iaqVoltage = Number(m[1]);
+    s.iaq = Number(m[2]);
+    s.distance = Number(m[3]);
+    s.lux = Number(m[4]);
   },
 
   // #166 Soil
   (line, s) => {
     const m = line.match(/Send: soil_temperature=([\d.-]+), soil_moisture=(\d+)/);
     if (!m) return;
-    s.soilTemp = Number(m[1]); s.soilMoisture = Number(m[2]);
+    s.soilTemp = Number(m[1]);
+    s.soilMoisture = Number(m[2]);
   },
 
   // #167 Health (temperature, heart rate, SpO2)
   (line, s) => {
     const m = line.match(/Send: temperature=([\d.-]+), heart_bpm=(\d+), spO2=(\d+)/);
     if (!m) return;
-    s.healthTemp = Number(m[1]); s.heartBpm = Number(m[2]); s.spo2 = Number(m[3]);
+    s.healthTemp = Number(m[1]);
+    s.heartBpm = Number(m[2]);
+    s.spo2 = Number(m[3]);
   },
 
   // #168 Radiation — µ is multi-byte UTF-8, match ..? instead of the literal
@@ -1793,26 +1936,29 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/Send: wind speed=([\d.-]+)m\/s, direction=(\d+) degrees, weight=([\d.-]+)kg/);
     if (!m) return;
-    s.windSpeed = Number(m[1]); s.windDir = Number(m[2]); s.weight = Number(m[3]);
+    s.windSpeed = Number(m[1]);
+    s.windDir = Number(m[2]);
+    s.weight = Number(m[3]);
   },
 
   // #170 Power — INA219/226 dual-channel
   (line, s) => {
     const m = line.match(
-        /Send: ch1_voltage=([\d.-]+), ch1_current=([\d.-]+), ch2_voltage=([\d.-]+), ch2_current=([\d.-]+)/
+      /Send: ch1_voltage=([\d.-]+), ch1_current=([\d.-]+), ch2_voltage=([\d.-]+), ch2_current=([\d.-]+)/,
     );
     if (!m) return;
-    s.ch1V = Number(m[1]); s.ch1I = Number(m[2]);
-    s.ch2V = Number(m[3]); s.ch2I = Number(m[4]);
+    s.ch1V = Number(m[1]);
+    s.ch1I = Number(m[2]);
+    s.ch2V = Number(m[3]);
+    s.ch2I = Number(m[4]);
   },
 
   // #171 Host metrics (Linux / Portduino)
   (line, s) => {
-    const m = line.match(
-        /Send: uptime=(\d+), diskfree=(\d+), memory free=(\d+), load=([\d.]+), ([\d.]+), ([\d.]+)/
-    );
+    const m = line.match(/Send: uptime=(\d+), diskfree=(\d+), memory free=(\d+), load=([\d.]+), ([\d.]+), ([\d.]+)/);
     if (!m) return;
-    s.hostUptime = Number(m[1]); s.hostDiskFree = Number(m[2]);
+    s.hostUptime = Number(m[1]);
+    s.hostDiskFree = Number(m[2]);
     s.hostMemFree = Number(m[3]);
     s.hostLoad = [Number(m[4]), Number(m[5]), Number(m[6])];
   },
@@ -1854,7 +2000,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     const m = line.match(/(\w[\w\d]*): Unable to ([^.]+?)(?:\. Error code: (\d+))?$/);
     if (!m) return;
-    const entry = {sensor: m[1], op: m[2].trim(), ...(m[3] !== undefined && {code: Number(m[3])})};
+    const entry = { sensor: m[1], op: m[2].trim(), ...(m[3] !== undefined && { code: Number(m[3]) }) };
     const key = `${m[1]}:${entry.op}`;
     if (!s.sensorErrors.some((e) => `${e.sensor}:${e.op}` === key)) s.sensorErrors.push(entry);
   },
@@ -1908,7 +2054,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // #187 BME680 / BSEC2 library status code
   (line, s) => {
     const m = line.match(/(\w+) (BSEC2|BME68X) code: (-?\d+)/);
-    if (m) s.bme680LibCode = {sensor: m[1], lib: m[2], code: Number(m[3])};
+    if (m) s.bme680LibCode = { sensor: m[1], lib: m[2], code: Number(m[3]) };
   },
 
   // ── Feature module diagnostics (#188–#201) ────────────────────────────────
@@ -1975,7 +2121,11 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // #198 TraceRoute allocation / null / self errors
   (line, s) => {
-    if (/Cannot trace route to self|Failed to allocate TraceRoute packet|MeshService is NULL!|Invalid node number for trace route/.test(line)) {
+    if (
+      /Cannot trace route to self|Failed to allocate TraceRoute packet|MeshService is NULL!|Invalid node number for trace route/.test(
+        line,
+      )
+    ) {
       s.tracerouteErrors++;
     }
   },
@@ -2025,8 +2175,13 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const nodeId = frM[1].toLowerCase();
     if (!s.seenNodes[nodeId]) {
       s.seenNodes[nodeId] = {
-        heard: 0, decoded: 0, dup: 0, hopSum: 0, hopCount: 0,
-        hopMin: Infinity, channels: {},
+        heard: 0,
+        decoded: 0,
+        dup: 0,
+        hopSum: 0,
+        hopCount: 0,
+        hopMin: Infinity,
+        channels: {},
       };
     }
     const ns = s.seenNodes[nodeId];
@@ -2123,7 +2278,7 @@ function fmtBytes(n: number): string {
 // Human "clock" duration — shows the two largest relevant units, surfacing
 // days / weeks / months only once the uptime is long enough to need them.
 function fmtUptime(s: number): string {
-  const mo = Math.floor(s / 2592000);          // 30-day months
+  const mo = Math.floor(s / 2592000); // 30-day months
   const w = Math.floor((s % 2592000) / 604800);
   const d = Math.floor((s % 604800) / 86400);
   const h = Math.floor((s % 86400) / 3600);
@@ -2144,40 +2299,91 @@ function fmtCoord(raw: number): string {
 export function renderSummary(s: DeviceSummary): string {
   const hasNak = Object.keys(s.nakErrors).length > 0;
   const hasEvents = !!(
-    s.securityWarning || s.watchdogReset || s.sslErrors > 0 || hasNak ||
-    s.busyRxCount > 5 || s.channelDecodeFailures > 0 || s.powerLossEvents > 0 ||
-    s.dutyCycleHits > 0 || s.bleNvsErrors > 0 || s.bleGattFailures > 0 ||
-    s.protoEncodeErrors > 0 || s.radioRxErrors > 0 || s.txRegionUnsetBlocked > 0 ||
-    s.reliableSendFailures > 0 || s.preHopDropMissingHopStart > 0 ||
-    s.tophoneQueueFull > 0 || s.invalidChannelIndexErrors > 0 ||
-    s.telemetryRateLimited > 0 || s.nodeDbFullEvictions > 0 ||
-    s.nodeDbDiscardedOldVersion || s.configVersionMismatch ||
-    s.codingRateOverride || s.packetCounterCorrupted ||
-    s.fsOrphan || s.pkiKeysRegenerated || s.factoryReset ||
-    s.invalidLoraConfig || s.missingCriticalPrefs.length > 0 ||
-    s.taskWatchdogTriggered || s.espPanicBacktrace || s.radioAssertFailed ||
-    s.criticalErrors.length > 0 || s.radioInitRetries > 0 || s.warmstoreRingCorrupt ||
-    s.deviceStateDiscarded || s.busyTxCount > 5 || s.fromRadioQOverflow > 0 ||
-    s.pkiClientKeyMismatch || s.pkiUnknownKeyDmRefused > 0 ||
-    s.radioBusyTxHardwareFailure || s.startTransmitFailures > 0 ||
-    s.radioRecoveryReboot || s.filesystemMountFailed || s.storageDecryptCorrupt ||
-    s.encryptionFailures > 0 || s.queuePushFailures > 0 || s.safeFileWriteFailures > 0 ||
-    s.lockdownActive || s.critLogCount > 0 || s.missingPrefs.length > 0 ||
-    s.powerChipFailures.length > 0 || s.gpsNotDetected || s.packetHistoryCorrupt ||
-    s.enteredDfuMode || s.scheduledReboot || s.adcErrors > 0 ||
-    s.tcxoFallbackToXtal || s.gpsSearchFailures > 0 || (s.gpsChecksumFailTotal ?? 0) > 0 ||
-    s.gpsBufferFullEvents > 0 || s.gpsFrameErrors > 0 || s.gpsConfigNacks > 0 ||
-    s.gpsConfigTimeouts > 0 || s.gpsAtgmConfigFailures > 0 || s.gpsConfigSaveFailed ||
-    s.gpsDefaultsMaintained || s.gpsBogusValueRejects > 0 ||
-    s.sensorErrors.length > 0 || s.sensorsDropped.length > 0 ||
-    s.sensorReadFailures > 0 || s.sensorChecksumFailures > 0 ||
-    s.sensorFrameErrors > 0 || s.sensorClockConflict.length > 0 ||
-    s.sensorCalibSaveFailed || s.adminConfigSaveFailed ||
-    s.configSaveFailures > 0 || s.adminDroppedStorageLocked > 0 ||
-    s.adminNoSessionKey > 0 || s.unsignedNodeInfoDropped > 0 ||
-    s.nodeInfoLicensedMismatch || s.keyVerificationFailures > 0 ||
-    s.storeForwardPsramFull || s.tracerouteErrors > 0 ||
-    s.detectionMisconfigured || s.femLnaUnsupported ||
+    s.securityWarning ||
+    s.watchdogReset ||
+    s.sslErrors > 0 ||
+    hasNak ||
+    s.busyRxCount > 5 ||
+    s.channelDecodeFailures > 0 ||
+    s.powerLossEvents > 0 ||
+    s.dutyCycleHits > 0 ||
+    s.bleNvsErrors > 0 ||
+    s.bleGattFailures > 0 ||
+    s.protoEncodeErrors > 0 ||
+    s.radioRxErrors > 0 ||
+    s.txRegionUnsetBlocked > 0 ||
+    s.reliableSendFailures > 0 ||
+    s.preHopDropMissingHopStart > 0 ||
+    s.tophoneQueueFull > 0 ||
+    s.invalidChannelIndexErrors > 0 ||
+    s.telemetryRateLimited > 0 ||
+    s.nodeDbFullEvictions > 0 ||
+    s.nodeDbDiscardedOldVersion ||
+    s.configVersionMismatch ||
+    s.codingRateOverride ||
+    s.packetCounterCorrupted ||
+    s.fsOrphan ||
+    s.pkiKeysRegenerated ||
+    s.factoryReset ||
+    s.invalidLoraConfig ||
+    s.missingCriticalPrefs.length > 0 ||
+    s.taskWatchdogTriggered ||
+    s.espPanicBacktrace ||
+    s.radioAssertFailed ||
+    s.criticalErrors.length > 0 ||
+    s.radioInitRetries > 0 ||
+    s.warmstoreRingCorrupt ||
+    s.deviceStateDiscarded ||
+    s.busyTxCount > 5 ||
+    s.fromRadioQOverflow > 0 ||
+    s.pkiClientKeyMismatch ||
+    s.pkiUnknownKeyDmRefused > 0 ||
+    s.radioBusyTxHardwareFailure ||
+    s.startTransmitFailures > 0 ||
+    s.radioRecoveryReboot ||
+    s.filesystemMountFailed ||
+    s.storageDecryptCorrupt ||
+    s.encryptionFailures > 0 ||
+    s.queuePushFailures > 0 ||
+    s.safeFileWriteFailures > 0 ||
+    s.lockdownActive ||
+    s.critLogCount > 0 ||
+    s.missingPrefs.length > 0 ||
+    s.powerChipFailures.length > 0 ||
+    s.gpsNotDetected ||
+    s.packetHistoryCorrupt ||
+    s.enteredDfuMode ||
+    s.scheduledReboot ||
+    s.adcErrors > 0 ||
+    s.tcxoFallbackToXtal ||
+    s.gpsSearchFailures > 0 ||
+    (s.gpsChecksumFailTotal ?? 0) > 0 ||
+    s.gpsBufferFullEvents > 0 ||
+    s.gpsFrameErrors > 0 ||
+    s.gpsConfigNacks > 0 ||
+    s.gpsConfigTimeouts > 0 ||
+    s.gpsAtgmConfigFailures > 0 ||
+    s.gpsConfigSaveFailed ||
+    s.gpsDefaultsMaintained ||
+    s.gpsBogusValueRejects > 0 ||
+    s.sensorErrors.length > 0 ||
+    s.sensorsDropped.length > 0 ||
+    s.sensorReadFailures > 0 ||
+    s.sensorChecksumFailures > 0 ||
+    s.sensorFrameErrors > 0 ||
+    s.sensorClockConflict.length > 0 ||
+    s.sensorCalibSaveFailed ||
+    s.adminConfigSaveFailed ||
+    s.configSaveFailures > 0 ||
+    s.adminDroppedStorageLocked > 0 ||
+    s.adminNoSessionKey > 0 ||
+    s.unsignedNodeInfoDropped > 0 ||
+    s.nodeInfoLicensedMismatch ||
+    s.keyVerificationFailures > 0 ||
+    s.storeForwardPsramFull ||
+    s.tracerouteErrors > 0 ||
+    s.detectionMisconfigured ||
+    s.femLnaUnsupported ||
     Object.keys(s.telemetryDecodeErrors).length > 0
   );
   if (!s.hardware && !s.firmware && !s.radioType && !hasEvents) return '';
@@ -2190,8 +2396,7 @@ export function renderSummary(s: DeviceSummary): string {
   const hwLabel = s.displayName ?? s.hardware ?? '';
   if (hwLabel) {
     const slug = s.hwModelSlug ? ` <span class="sum-tag">${s.hwModelSlug}</span>` : '';
-    const id = s.hwModelId !== undefined && !s.hwModelSlug ?
-      ` <span class="sum-tag">model ${s.hwModelId}</span>` : '';
+    const id = s.hwModelId !== undefined && !s.hwModelSlug ? ` <span class="sum-tag">model ${s.hwModelId}</span>` : '';
     const hwTt: string[] = [];
     if (s.displayName && s.hardware) hwTt.push(`Target: ${s.hardware}`);
     if (s.hwModelId !== undefined) hwTt.push(`Model ID: ${s.hwModelId}`);
@@ -2248,8 +2453,11 @@ export function renderSummary(s: DeviceSummary): string {
     const lon = fmtCoord(s.localLon);
     const alt = s.localAlt !== undefined ? ` · ${Math.round(s.localAlt / 1000)}m alt` : '';
     const siv = s.gpsSiv !== undefined ? ` · ${s.gpsSiv} sats` : '';
-    rows.push(['Position', `${lat}, ${lon}${alt}${siv}`,
-      'Last known position from GPS (lat/lon in millionths of degree × 10)']);
+    rows.push([
+      'Position',
+      `${lat}, ${lon}${alt}${siv}`,
+      'Last known position from GPS (lat/lon in millionths of degree × 10)',
+    ]);
   }
 
   if (s.i2cDevices.length || s.accelChipId !== undefined || s.magChipId !== undefined) {
@@ -2268,8 +2476,12 @@ export function renderSummary(s: DeviceSummary): string {
   }
 
   // Memory / storage section
-  const hasMemory = s.heapTotal !== undefined || s.heapFree !== undefined ||
-    s.psramTotal !== undefined || s.nvsUsed !== undefined || s.fsUsed !== undefined;
+  const hasMemory =
+    s.heapTotal !== undefined ||
+    s.heapFree !== undefined ||
+    s.psramTotal !== undefined ||
+    s.nvsUsed !== undefined ||
+    s.fsUsed !== undefined;
   if (hasMemory) {
     rows.push(['', '', undefined]); // spacer via divider approach below — see end of grid
   }
@@ -2282,8 +2494,11 @@ export function renderSummary(s: DeviceSummary): string {
     rows.push(['Reboots', String(s.rebootCount)]);
   }
   if (s.bootErrors > 0) {
-    rows.push(['Boot errors', `<span class="sum-warn">${s.bootErrors}</span>`,
-      'Hardware initialization failures at startup']);
+    rows.push([
+      'Boot errors',
+      `<span class="sum-warn">${s.bootErrors}</span>`,
+      'Hardware initialization failures at startup',
+    ]);
   }
 
   // ── Memory section ──────────────────────────────────────────────────────────
@@ -2292,8 +2507,7 @@ export function renderSummary(s: DeviceSummary): string {
   if (s.heapTotal !== undefined || s.heapFree !== undefined) {
     const total = s.heapTotal !== undefined ? fmtBytes(s.heapTotal) : '?';
     const free = s.heapFree !== undefined ? fmtBytes(s.heapFree) : '?';
-    const pct = (s.heapTotal && s.heapFree) ?
-      Math.round((s.heapFree / s.heapTotal) * 100) : undefined;
+    const pct = s.heapTotal && s.heapFree ? Math.round((s.heapFree / s.heapTotal) * 100) : undefined;
     const warn = pct !== undefined && pct < 20 ? ' <span class="sum-warn">low</span>' : '';
     const pctStr = pct !== undefined ? ` (${pct}% free)` : '';
     memRows.push(['Heap', `${free} free / ${total}${pctStr}${warn}`]);
@@ -2337,38 +2551,43 @@ export function renderSummary(s: DeviceSummary): string {
   if (s.gpsLockTimeSecs !== undefined || s.gpsLocksAcquired > 0) {
     const t = s.gpsLockTimeSecs !== undefined ? `${s.gpsLockTimeSecs}s to lock` : '';
     const c = s.gpsLocksAcquired > 0 ? `×${s.gpsLocksAcquired} acquired` : '';
-    modRows.push(['GPS lock', [t, c].filter(Boolean).join(' · '),
-      'Time to first fix and lock acquisition count in this session']);
+    modRows.push([
+      'GPS lock',
+      [t, c].filter(Boolean).join(' · '),
+      'Time to first fix and lock acquisition count in this session',
+    ]);
   }
 
   if (s.gpsConsecutiveLockFailures !== undefined) {
     const cls = s.gpsConsecutiveLockFailures > 3 ? ' class="sum-warn"' : '';
-    modRows.push(['GPS failures',
+    modRows.push([
+      'GPS failures',
       `<span${cls}>${s.gpsConsecutiveLockFailures} consecutive · ${s.gpsSearchFailures} searches</span>`,
-      'Consecutive lock failures (rising = chip blind); resets to 0 on any successful fix']);
+      'Consecutive lock failures (rising = chip blind); resets to 0 on any successful fix',
+    ]);
   }
 
   if (s.gpsConstellations) {
-    modRows.push(['GNSS', s.gpsConstellations,
-      'Constellation configuration acknowledged by the module']);
+    modRows.push(['GNSS', s.gpsConstellations, 'Constellation configuration acknowledged by the module']);
   }
 
   if (s.gpsPowerState) {
     const t = s.gpsPowerStateTransitions > 1 ? ` (×${s.gpsPowerStateTransitions} transitions)` : '';
-    modRows.push(['GPS power', s.gpsPowerState + t,
-      'Most recent GPS power state transition']);
+    modRows.push(['GPS power', s.gpsPowerState + t, 'Most recent GPS power state transition']);
   }
 
   if (s.gpsUserMode) {
-    modRows.push(['GPS mode', s.gpsUserMode,
-      'User-toggled GPS enable/disable setting at end of log']);
+    modRows.push(['GPS mode', s.gpsUserMode, 'User-toggled GPS enable/disable setting at end of log']);
   }
 
   if (s.rtcDriftCorrections > 0) {
     const drift = s.lastClockDriftSecs !== undefined ? ` · last ${s.lastClockDriftSecs}s drift` : '';
     const driftStr = `×${s.rtcDriftCorrections} correction${s.rtcDriftCorrections !== 1 ? 's' : ''}${drift}`;
-    modRows.push(['Clock drift', driftStr,
-      'External time applied to correct RTC drift; frequent or large drift indicates crystal instability']);
+    modRows.push([
+      'Clock drift',
+      driftStr,
+      'External time applied to correct RTC drift; frequent or large drift indicates crystal instability',
+    ]);
   }
 
   if (s.envTemperature !== undefined || s.envHumidity !== undefined || s.envPressure !== undefined) {
@@ -2386,8 +2605,11 @@ export function renderSummary(s: DeviceSummary): string {
   }
 
   if (s.pm25 !== undefined) {
-    modRows.push(['PM2.5/10/100', `${s.pm25} / ${s.pm10} / ${s.pm100 ?? '?'} µg/m³`,
-      'Particulate matter concentrations (standard units)']);
+    modRows.push([
+      'PM2.5/10/100',
+      `${s.pm25} / ${s.pm10} / ${s.pm100 ?? '?'} µg/m³`,
+      'Particulate matter concentrations (standard units)',
+    ]);
   }
 
   if (s.iaq !== undefined || s.lux !== undefined) {
@@ -2419,8 +2641,8 @@ export function renderSummary(s: DeviceSummary): string {
   }
 
   if (s.ch1V !== undefined) {
-    const inaStr = `CH1 ${s.ch1V?.toFixed(2)}V ${s.ch1I?.toFixed(0)}mA` +
-      ` · CH2 ${s.ch2V?.toFixed(2)}V ${s.ch2I?.toFixed(0)}mA`;
+    const inaStr =
+      `CH1 ${s.ch1V?.toFixed(2)}V ${s.ch1I?.toFixed(0)}mA` + ` · CH2 ${s.ch2V?.toFixed(2)}V ${s.ch2I?.toFixed(0)}mA`;
     modRows.push(['Power INA', inaStr]);
   }
 
@@ -2432,8 +2654,11 @@ export function renderSummary(s: DeviceSummary): string {
 
   if (s.peerTelemetryCount > 0) {
     const peers = Object.keys(s.peerTelemetry).length;
-    modRows.push(['Peer TM', `${s.peerTelemetryCount} samples from ${peers} node${peers !== 1 ? 's' : ''}`,
-      'Telemetry received from neighbouring nodes in this log session']);
+    modRows.push([
+      'Peer TM',
+      `${s.peerTelemetryCount} samples from ${peers} node${peers !== 1 ? 's' : ''}`,
+      'Telemetry received from neighbouring nodes in this log session',
+    ]);
   }
 
   if (s.airUtilTx !== undefined) {
@@ -2449,12 +2674,10 @@ export function renderSummary(s: DeviceSummary): string {
   }
 
   if (s.hopLimit !== undefined) {
-    const fillWarn = s.hopFill && parseInt(s.hopFill, 10) > 50 ?
-      ` <span class="sum-warn">${s.hopFill}</span>` : ` ${s.hopFill}`;
-    const politeNote = s.hopPolite && s.hopPolite !== '0/0' ?
-      ` · polite ${s.hopPolite} skipped` : '';
-    modRows.push(['Hop limit',
-      `${s.hopLimit}${fillWarn} fill${politeNote} · resets ${s.hopNextRoll}`]);
+    const fillWarn =
+      s.hopFill && parseInt(s.hopFill, 10) > 50 ? ` <span class="sum-warn">${s.hopFill}</span>` : ` ${s.hopFill}`;
+    const politeNote = s.hopPolite && s.hopPolite !== '0/0' ? ` · polite ${s.hopPolite} skipped` : '';
+    modRows.push(['Hop limit', `${s.hopLimit}${fillWarn} fill${politeNote} · resets ${s.hopNextRoll}`]);
   }
 
   if (s.lastRssi !== undefined) {
@@ -2465,23 +2688,23 @@ export function renderSummary(s: DeviceSummary): string {
 
   if (s.rxGood !== undefined) {
     const bad = s.rxBad ? ` · <span class="sum-warn">${s.rxBad} bad</span>` : '';
-    modRows.push(['RX/TX',
-      `TX ${s.txGood} (+${s.txRelay} relay) · RX ${s.rxGood}${bad}`]);
+    modRows.push(['RX/TX', `TX ${s.txGood} (+${s.txRelay} relay) · RX ${s.rxGood}${bad}`]);
   }
 
   if (s.numPacketsTx !== undefined) {
     const bad = s.numPacketsRxBad ? ` · <span class="sum-warn">${s.numPacketsRxBad} RX bad</span>` : '';
-    modRows.push(['Pkts (TM)', `TX ${s.numPacketsTx} · RX ${s.numPacketsRx}${bad}`,
-      'Cumulative packet counters from DeviceTelemetry (all-time)']);
+    modRows.push([
+      'Pkts (TM)',
+      `TX ${s.numPacketsTx} · RX ${s.numPacketsRx}${bad}`,
+      'Cumulative packet counters from DeviceTelemetry (all-time)',
+    ]);
   }
 
   if (s.bleConnections > 0 || s.bleConnectedTo) {
     const disc = s.bleDisconnections > 0 ? ` · ${s.bleDisconnections} disconn` : '';
     const peer = s.bleConnectedTo ? ` peer: ${s.bleConnectedTo}` : '';
     const count = s.bleConnections;
-    const sessions = count > 0 ?
-      `${count} session${count !== 1 ? 's' : ''}${disc}` :
-      '';
+    const sessions = count > 0 ? `${count} session${count !== 1 ? 's' : ''}${disc}` : '';
     modRows.push(['BLE', (sessions + (sessions && peer ? ' ·' : '') + peer).trim()]);
   }
 
@@ -2494,635 +2717,882 @@ export function renderSummary(s: DeviceSummary): string {
 
   if (s.lastBeaconMsg) {
     const from = s.lastBeaconFrom ? ` <span style="color:var(--muted)">from ${s.lastBeaconFrom}</span>` : '';
-    modRows.push(['Beacon', `'${s.lastBeaconMsg}'` + from,
-      'Beacon TEXT_MESSAGE_APP payload from MeshBeaconBroadcast (split-B)']);
+    modRows.push([
+      'Beacon',
+      `'${s.lastBeaconMsg}'` + from,
+      'Beacon TEXT_MESSAGE_APP payload from MeshBeaconBroadcast (split-B)',
+    ]);
   }
 
   if (s.lastMessage) {
     const from = s.lastMessageFrom ? ` <span style="color:var(--muted)">from ${s.lastMessageFrom}</span>` : '';
-    modRows.push(['Last msg', s.lastMessage + from,
-      'Last decryptable text message received in this log session']);
+    modRows.push(['Last msg', s.lastMessage + from, 'Last decryptable text message received in this log session']);
   }
 
   if (s.traceroutes) {
-    const hops = s.tracerouteLastHops !== undefined ?
-      `${s.tracerouteLastHops} hop${s.tracerouteLastHops === 1 ? '' : 's'}` : '';
-    const peak = (s.tracerouteMaxHops ?? 0) > (s.tracerouteLastHops ?? 0) ?
-      ` <span style="color:var(--muted)">(max ${s.tracerouteMaxHops})</span>` : '';
-    const snr = s.tracerouteWorstSnr !== undefined ?
-      ` <span style="color:var(--muted)">worst ${s.tracerouteWorstSnr.toFixed(2)} dB</span>` : '';
+    const hops =
+      s.tracerouteLastHops !== undefined ? `${s.tracerouteLastHops} hop${s.tracerouteLastHops === 1 ? '' : 's'}` : '';
+    const peak =
+      (s.tracerouteMaxHops ?? 0) > (s.tracerouteLastHops ?? 0)
+        ? ` <span style="color:var(--muted)">(max ${s.tracerouteMaxHops})</span>`
+        : '';
+    const snr =
+      s.tracerouteWorstSnr !== undefined
+        ? ` <span style="color:var(--muted)">worst ${s.tracerouteWorstSnr.toFixed(2)} dB</span>`
+        : '';
     const count = s.traceroutes > 1 ? ` ×${s.traceroutes}` : '';
-    modRows.push(['Traceroute', `${hops}${peak}${snr}${count}`,
-      'Routes reassembled from "Route traced:" + the prefix-less hop line(s) that follow it']);
+    modRows.push([
+      'Traceroute',
+      `${hops}${peak}${snr}${count}`,
+      'Routes reassembled from "Route traced:" + the prefix-less hop line(s) that follow it',
+    ]);
   }
 
   // ── Events / errors ──────────────────────────────────────────────────────────
   const evtRows: Array<[string, string, string?]> = [];
 
   if (s.securityWarning) {
-    evtRows.push(['Security', '<span class="sum-err">⚠ key advertised by remote — regenerate keys</span>',
-      'A remote node is advertising your network key — regenerate keys immediately']);
+    evtRows.push([
+      'Security',
+      '<span class="sum-err">⚠ key advertised by remote — regenerate keys</span>',
+      'A remote node is advertising your network key — regenerate keys immediately',
+    ]);
   }
   if (s.watchdogReset) {
     const detail = s.espRstCode ? ` (${s.espRstCode})` : s.resetReason === 'intWatchdog' ? ' (NRF52 intWatchdog)' : '';
-    evtRows.push(['Reset', `<span class="sum-err">watchdog reset${detail}</span>`,
-      'Firmware crash triggered a hardware watchdog reset']);
+    evtRows.push([
+      'Reset',
+      `<span class="sum-err">watchdog reset${detail}</span>`,
+      'Firmware crash triggered a hardware watchdog reset',
+    ]);
   }
   if (s.wakeSource !== undefined && s.wakeSource !== 0 && !s.watchdogReset) {
-    evtRows.push(['Wake cause', String(s.wakeSource),
-      `NRF52 wake-from-sleep source code (boot count: ${s.bootCount ?? '?'})`]);
+    evtRows.push([
+      'Wake cause',
+      String(s.wakeSource),
+      `NRF52 wake-from-sleep source code (boot count: ${s.bootCount ?? '?'})`,
+    ]);
   }
   if (s.sslErrors > 0) {
-    evtRows.push(['SSL',
+    evtRows.push([
+      'SSL',
       `<span class="sum-err">${s.sslErrors} cert error${s.sslErrors !== 1 ? 's' : ''} — check certificate files</span>`,
-      'TLS certificate validation failed — check that cert/key files are valid and not expired']);
+      'TLS certificate validation failed — check that cert/key files are valid and not expired',
+    ]);
   }
   if (hasNak) {
-    const parts = Object.entries(s.nakErrors).map(([code, count]) => {
-      const name = NAK_ERROR_NAMES[Number(code)] ?? `err${code}`;
-      return `${name} ×${count}`;
-    }).join(' · ');
-    evtRows.push(['NAK drops', `<span class="sum-warn">${parts}</span>`,
-      'Packets rejected by the router — see Routing.Error enum in mesh.proto']);
+    const parts = Object.entries(s.nakErrors)
+      .map(([code, count]) => {
+        const name = NAK_ERROR_NAMES[Number(code)] ?? `err${code}`;
+        return `${name} ×${count}`;
+      })
+      .join(' · ');
+    evtRows.push([
+      'NAK drops',
+      `<span class="sum-warn">${parts}</span>`,
+      'Packets rejected by the router — see Routing.Error enum in mesh.proto',
+    ]);
   }
   if (s.busyRxCount > 0) {
     const cls = s.busyRxCount > 20 ? 'sum-warn' : '';
     const count = s.busyRxCount > 999 ? '>999' : `×${s.busyRxCount}`;
     const label = s.busyRxCount > 20 ? 'RF congestion' : 'busyRx';
-    evtRows.push([label, cls ? `<span class="${cls}">${count}</span>` : count,
-      'Radio was mid-receive when a TX was attempted — high counts indicate a congested RF environment']);
+    evtRows.push([
+      label,
+      cls ? `<span class="${cls}">${count}</span>` : count,
+      'Radio was mid-receive when a TX was attempted — high counts indicate a congested RF environment',
+    ]);
   }
   if (s.dutyCycleHits > 0) {
-    evtRows.push(['Duty cycle',
+    evtRows.push([
+      'Duty cycle',
       `<span class="sum-warn">×${s.dutyCycleHits} TX blocked — regulatory limit</span>`,
-      'EU LoRa duty cycle limit hit — TX blocked to stay within the legal airtime cap']);
+      'EU LoRa duty cycle limit hit — TX blocked to stay within the legal airtime cap',
+    ]);
   }
   if (s.txRegionUnsetBlocked > 0) {
-    evtRows.push(['Region UNSET',
+    evtRows.push([
+      'Region UNSET',
       `<span class="sum-warn">×${s.txRegionUnsetBlocked} TX blocked — region not set</span>`,
-      'TX blocked because the LoRa region is not configured']);
+      'TX blocked because the LoRa region is not configured',
+    ]);
   }
   if (s.protoEncodeErrors > 0) {
-    evtRows.push(['Proto error',
+    evtRows.push([
+      'Proto error',
       `<span class="sum-warn">×${s.protoEncodeErrors} invalid UTF-8 in protobuf encode</span>`,
-      'Malformed UTF-8 caused protobuf serialisation to fail — check node name / message content']);
+      'Malformed UTF-8 caused protobuf serialisation to fail — check node name / message content',
+    ]);
   }
   if (s.radioRxErrors > 0) {
-    evtRows.push(['RX errors',
+    evtRows.push([
+      'RX errors',
       `<span class="sum-warn">×${s.radioRxErrors} RadioIf packets ignored (error)</span>`,
-      'RadioIf discarded received packets due to an internal error code']);
+      'RadioIf discarded received packets due to an internal error code',
+    ]);
   }
   if (s.reliableSendFailures > 0) {
-    evtRows.push(['Send fail',
+    evtRows.push([
+      'Send fail',
       `<span class="sum-warn">×${s.reliableSendFailures} reliable send failed (NAK returned)</span>`,
-      'Reliable (ack-required) send failed after all retransmissions']);
+      'Reliable (ack-required) send failed after all retransmissions',
+    ]);
   }
   if (s.preHopDropMissingHopStart > 0) {
-    evtRows.push(['Pre-hop drop',
+    evtRows.push([
+      'Pre-hop drop',
       `<span class="sum-warn">×${s.preHopDropMissingHopStart} dropped (hop_start missing)</span>`,
-      'Packets dropped pre-hop because hop_start was invalid/missing (possible firmware version mismatch)']);
+      'Packets dropped pre-hop because hop_start was invalid/missing (possible firmware version mismatch)',
+    ]);
   }
   if (s.tophoneQueueFull > 0) {
-    evtRows.push(['To-phone Q',
+    evtRows.push([
+      'To-phone Q',
       `<span class="sum-warn">×${s.tophoneQueueFull} queue full — packets dropped</span>`,
-      'Packet queue to the connected phone app overflowed']);
+      'Packet queue to the connected phone app overflowed',
+    ]);
   }
   if (s.invalidChannelIndexErrors > 0) {
-    evtRows.push(['Chan index',
+    evtRows.push([
+      'Chan index',
       `<span class="sum-warn">×${s.invalidChannelIndexErrors} invalid channel index</span>`,
-      'Router encountered a packet with an out-of-range channel index']);
+      'Router encountered a packet with an out-of-range channel index',
+    ]);
   }
   if (s.channelDecodeFailures > 0) {
-    evtRows.push(['Decode fail',
+    evtRows.push([
+      'Decode fail',
       `<span class="sum-warn">×${s.channelDecodeFailures} (unknown channel hash)</span>`,
-      'Received packets whose channel hash did not match any known channel — likely mismatched channel key']);
+      'Received packets whose channel hash did not match any known channel — likely mismatched channel key',
+    ]);
   }
   if (s.telemetryRateLimited > 0) {
-    evtRows.push(['Rate limit',
+    evtRows.push([
+      'Rate limit',
       `×${s.telemetryRateLimited} telemetry portnum rate-limited`,
-      'DeviceTelemetry was rate-limited before being forwarded']);
+      'DeviceTelemetry was rate-limited before being forwarded',
+    ]);
   }
   if (s.nodeDbFullEvictions > 0) {
-    evtRows.push(['NodeDB full',
+    evtRows.push([
+      'NodeDB full',
       `<span class="sum-warn">×${s.nodeDbFullEvictions} eviction${s.nodeDbFullEvictions !== 1 ? 's' : ''}</span>`,
-      'NodeDB was full — oldest node evicted to make room']);
+      'NodeDB was full — oldest node evicted to make room',
+    ]);
   }
   if (s.powerLossEvents > 0) {
-    evtRows.push(['Power loss', `<span class="sum-warn">×${s.powerLossEvents}</span>`,
-      'Unexpected power interruptions detected in this session']);
+    evtRows.push([
+      'Power loss',
+      `<span class="sum-warn">×${s.powerLossEvents}</span>`,
+      'Unexpected power interruptions detected in this session',
+    ]);
   }
   if (s.bleNvsErrors > 0) {
-    evtRows.push(['BLE NVS',
+    evtRows.push([
+      'BLE NVS',
       `<span class="sum-warn">×${s.bleNvsErrors} bonding data corrupted — clear NVS to fix</span>`,
-      'Bluetooth bonding data in flash is corrupted — erase NVS partition to restore pairing']);
+      'Bluetooth bonding data in flash is corrupted — erase NVS partition to restore pairing',
+    ]);
   }
   if (s.bleGattFailures > 0) {
-    evtRows.push(['BLE GATT', `<span class="sum-warn">×${s.bleGattFailures} connection failed</span>`,
-      'Bluetooth GATT connection establishment failures — may affect app connectivity']);
+    evtRows.push([
+      'BLE GATT',
+      `<span class="sum-warn">×${s.bleGattFailures} connection failed</span>`,
+      'Bluetooth GATT connection establishment failures — may affect app connectivity',
+    ]);
   }
   if (s.nodeDbDiscardedOldVersion) {
-    evtRows.push(['NodeDB', 'old format discarded — clean rebuild',
-      'NodeDB was an unsupported old version and was discarded; it will be rebuilt from beacon packets']);
+    evtRows.push([
+      'NodeDB',
+      'old format discarded — clean rebuild',
+      'NodeDB was an unsupported old version and was discarded; it will be rebuilt from beacon packets',
+    ]);
   }
   if (s.configVersionMismatch) {
-    evtRows.push(['Config ver', '<span class="sum-warn">version mismatch — migration applied</span>',
-      'Loaded config with a different schema version; config was migrated automatically']);
+    evtRows.push([
+      'Config ver',
+      '<span class="sum-warn">version mismatch — migration applied</span>',
+      'Loaded config with a different schema version; config was migrated automatically',
+    ]);
   }
   if (s.codingRateOverride) {
-    evtRows.push(['Coding rate', 'default CR higher than custom setting — override applied',
-      'The preset\'s default coding rate was larger than the custom override; custom setting used']);
+    evtRows.push([
+      'Coding rate',
+      'default CR higher than custom setting — override applied',
+      "The preset's default coding rate was larger than the custom override; custom setting used",
+    ]);
   }
   if (s.packetCounterCorrupted) {
-    evtRows.push(['Pkt counter', '<span class="sum-warn">counters look corrupted (huge at low uptime)</span>',
-      'Packet counters were unrealistically large for the observed uptime — counter wrap or flash corruption']);
+    evtRows.push([
+      'Pkt counter',
+      '<span class="sum-warn">counters look corrupted (huge at low uptime)</span>',
+      'Packet counters were unrealistically large for the observed uptime — counter wrap or flash corruption',
+    ]);
   }
   if (s.noHwRng) {
-    evtRows.push(['Entropy', 'SW RNG (no hardware radio entropy source)',
-      'No hardware random number generator found — using software entropy (lower security)']);
+    evtRows.push([
+      'Entropy',
+      'SW RNG (no hardware radio entropy source)',
+      'No hardware random number generator found — using software entropy (lower security)',
+    ]);
   }
   if (s.rtcMissing) {
-    evtRows.push(['RTC', 'not detected',
-      'Real-time clock not detected — timestamps may be inaccurate until GPS or NTP sync']);
+    evtRows.push([
+      'RTC',
+      'not detected',
+      'Real-time clock not detected — timestamps may be inaccurate until GPS or NTP sync',
+    ]);
   }
   if (s.radioProbeFailures.length && !s.radioType) {
-    evtRows.push(['Radio probe', `failed: ${s.radioProbeFailures.join(', ')}`,
-      'Radio chip detection failed — check hardware connections and solder joints']);
+    evtRows.push([
+      'Radio probe',
+      `failed: ${s.radioProbeFailures.join(', ')}`,
+      'Radio chip detection failed — check hardware connections and solder joints',
+    ]);
   }
   if (s.fsOrphan) {
-    evtRows.push(['Filesystem',
+    evtRows.push([
+      'Filesystem',
       '<span class="sum-err">LittleFS orphan — flash left inconsistent by interrupted write</span>',
       'LittleFS found an orphaned block: a write was interrupted by a reboot. Settings may fail ' +
-      'to persist across reboots — a full erase + reflash is recommended.']);
+        'to persist across reboots — a full erase + reflash is recommended.',
+    ]);
   }
   if (s.missingCriticalPrefs.length) {
-    evtRows.push(['Prefs missing',
+    evtRows.push([
+      'Prefs missing',
       `<span class="sum-warn">${s.missingCriticalPrefs.join(', ')} not loaded — defaults installed</span>`,
       'Persistence-critical prefs could not be read and defaults were installed. Normal on a fresh ' +
-      'device, but on a configured device it means saved settings are not surviving reboots.']);
+        'device, but on a configured device it means saved settings are not surviving reboots.',
+    ]);
   }
   if (s.factoryReset) {
-    evtRows.push(['Factory reset',
+    evtRows.push([
+      'Factory reset',
       '<span class="sum-err">device performed a full factory reset</span>',
-      'A factory-reset command wiped all prefs — node identity and settings are regenerated.']);
+      'A factory-reset command wiped all prefs — node identity and settings are regenerated.',
+    ]);
   }
   if (s.pkiKeysRegenerated) {
-    evtRows.push(['PKI keys',
+    evtRows.push([
+      'PKI keys',
       '<span class="sum-warn">new key pair generated — node identity changed</span>',
       'The device generated new PKI keys, changing its public key and identity to peers. Unexpected ' +
-      'mid-session, this points to security config not persisting.']);
+        'mid-session, this points to security config not persisting.',
+    ]);
   }
   if (s.invalidLoraConfig) {
-    evtRows.push(['LoRa config',
+    evtRows.push([
+      'LoRa config',
       '<span class="sum-warn">invalid values received — corrected by firmware</span>',
       'The client sent an invalid LoRa config (e.g. coding_rate/spread_factor 0, or a preset ' +
-      'incompatible with the region); the firmware substituted corrected values.']);
+        'incompatible with the region); the firmware substituted corrected values.',
+    ]);
   }
 
   // ── New events (94–140) ──────────────────────────────────────────────────────
 
   if (s.lockdownActive) {
-    evtRows.push(['Lockdown',
+    evtRows.push([
+      'Lockdown',
       `<span class="sum-err">🔒 ${s.lockdownState ?? 'active'}</span>`,
-      'Device entered lockdown — may require admin provisioning to recover.']);
+      'Device entered lockdown — may require admin provisioning to recover.',
+    ]);
   }
   if (s.taskWatchdogTriggered) {
     const task = s.watchdogTask ? ` (starved task: ${s.watchdogTask})` : '';
-    evtRows.push(['Task WDT',
+    evtRows.push([
+      'Task WDT',
       `<span class="sum-err">ESP-IDF task watchdog fired${task}</span>`,
-      'The ESP-IDF task watchdog detected a starved task — indicates a blocking loop or deadlock.']);
+      'The ESP-IDF task watchdog detected a starved task — indicates a blocking loop or deadlock.',
+    ]);
   }
   if (s.espPanicBacktrace) {
     const pc = s.panicPc ? ` PC: ${s.panicPc}` : '';
-    evtRows.push(['Panic',
+    evtRows.push([
+      'Panic',
       `<span class="sum-err">ESP32 panic backtrace${pc}</span>`,
-      'A hard fault / panic was triggered. Load the ELF and run addr2line on the backtrace PCs.']);
+      'A hard fault / panic was triggered. Load the ELF and run addr2line on the backtrace PCs.',
+    ]);
   }
   if (s.radioAssertFailed) {
     const locs = s.assertLocations.join(', ');
-    evtRows.push(['Radio assert',
+    evtRows.push([
+      'Radio assert',
       `<span class="sum-err">assert failed: ${locs}</span>`,
       'RadioIf assertion tripped — radio driver reached an impossible state. ' +
-      'Usually follows SPI_CMD_FAILED or a wedged radio.']);
+        'Usually follows SPI_CMD_FAILED or a wedged radio.',
+    ]);
   }
   if (s.criticalErrors.length > 0) {
-    const parts = s.criticalErrors.map((e) => {
-      const name = CRIT_ERR[e.code] ?? `code ${e.code}`;
-      return `${name} @ ${e.file}:${e.line}`;
-    }).join(' · ');
-    evtRows.push(['Critical error',
+    const parts = s.criticalErrors
+      .map((e) => {
+        const name = CRIT_ERR[e.code] ?? `code ${e.code}`;
+        return `${name} @ ${e.file}:${e.line}`;
+      })
+      .join(' · ');
+    evtRows.push([
+      'Critical error',
       `<span class="sum-err">${parts}</span>`,
-      'Firmware recorded a CriticalErrorCode — see meshtastic/mesh.proto for the enum.']);
+      'Firmware recorded a CriticalErrorCode — see meshtastic/mesh.proto for the enum.',
+    ]);
   }
   if (s.radioBusyTxHardwareFailure) {
-    evtRows.push(['Radio HW fail',
+    evtRows.push([
+      'Radio HW fail',
       '<span class="sum-err">busyTx > 60 s — radio wedged in TX</span>',
       'The radio hardware appeared stuck transmitting for over 60 seconds. ' +
-      'Antenna, RF stage, or SPI fault. A reset is usually required.']);
+        'Antenna, RF stage, or SPI fault. A reset is usually required.',
+    ]);
   }
   if (s.radioRecoveryReboot) {
-    evtRows.push(['LoRa recovery',
+    evtRows.push([
+      'LoRa recovery',
       '<span class="sum-err">reconfigure failed — device rebooting</span>',
-      'The radio reconfiguration failed and the firmware triggered a reboot to recover.']);
+      'The radio reconfiguration failed and the firmware triggered a reboot to recover.',
+    ]);
   }
   if (s.warmstoreRingCorrupt) {
     const pages = s.warmstoreBadPages !== undefined ? ` (${s.warmstoreBadPages} bad pages)` : '';
-    evtRows.push(['WarmStore',
+    evtRows.push([
+      'WarmStore',
       `<span class="sum-err">ring unreadable${pages} — node cache empty</span>`,
-      'The WarmStore ring buffer had bad pages; the node cache was discarded and will be rebuilt.']);
+      'The WarmStore ring buffer had bad pages; the node cache was discarded and will be rebuilt.',
+    ]);
   }
   if (s.deviceStateDiscarded) {
-    evtRows.push(['Device state',
+    evtRows.push([
+      'Device state',
       '<span class="sum-warn">old or invalid, discarded — clean rebuild</span>',
-      'The saved device state was an unsupported version; it was discarded and rebuilt from scratch.']);
+      'The saved device state was an unsupported version; it was discarded and rebuilt from scratch.',
+    ]);
   }
   if (s.storageDecryptCorrupt) {
-    evtRows.push(['Decrypt fail',
+    evtRows.push([
+      'Decrypt fail',
       '<span class="sum-err">storage decrypt failed — treated as corrupt</span>',
       'A persisted file could not be decrypted/decoded and was treated as corrupt. ' +
-      'Settings may be lost — check encrypted storage key.']);
+        'Settings may be lost — check encrypted storage key.',
+    ]);
   }
   if (s.filesystemMountFailed) {
-    evtRows.push(['FS mount',
+    evtRows.push([
+      'FS mount',
       '<span class="sum-err">filesystem mount failed — storage unavailable</span>',
       'The LittleFS/SPIFFS partition failed to mount. ' +
-      'Settings will not persist. A full erase + reflash is likely required.']);
+        'Settings will not persist. A full erase + reflash is likely required.',
+    ]);
   }
   if (s.encryptionFailures > 0) {
-    evtRows.push(['Encrypt fail',
+    evtRows.push([
+      'Encrypt fail',
       `<span class="sum-err">×${s.encryptionFailures} encryption / OOM errors</span>`,
-      'SafeFile encrypted writes failed — settings may not be persisted. Possible RAM pressure.']);
+      'SafeFile encrypted writes failed — settings may not be persisted. Possible RAM pressure.',
+    ]);
   }
   if (s.queuePushFailures > 0) {
-    evtRows.push(['Queue full',
+    evtRows.push([
+      'Queue full',
       `<span class="sum-err">×${s.queuePushFailures} CRIT: queue push failed</span>`,
-      'toPhone / MQTT / notification queue pushes failed at CRIT severity — packets were dropped.']);
+      'toPhone / MQTT / notification queue pushes failed at CRIT severity — packets were dropped.',
+    ]);
   }
   if (s.safeFileWriteFailures > 0) {
-    evtRows.push(['SafeFile',
+    evtRows.push([
+      'SafeFile',
       `<span class="sum-warn">×${s.safeFileWriteFailures} write integrity failure</span>`,
-      'SafeFile readback hash mismatch or rename failure — a settings write did not complete safely.']);
+      'SafeFile readback hash mismatch or rename failure — a settings write did not complete safely.',
+    ]);
   }
   if (s.pkiClientKeyMismatch) {
-    evtRows.push(['PKI mismatch',
+    evtRows.push([
+      'PKI mismatch',
       '<span class="sum-warn">client public key differs from stored key</span>',
       'The connecting client presented a public key that does not match what the node has stored. ' +
-      'Could indicate key rotation or a replay attack.']);
+        'Could indicate key rotation or a replay attack.',
+    ]);
   }
   if (s.pkiUnknownKeyDmRefused > 0) {
-    evtRows.push(['PKI DM blocked',
+    evtRows.push([
+      'PKI DM blocked',
       `<span class="sum-warn">×${s.pkiUnknownKeyDmRefused} DM refused (unknown key)</span>`,
-      'Direct messages were refused because the destination node\'s public key is not known. ' +
-      'The nodes may not have exchanged node-info yet.']);
+      "Direct messages were refused because the destination node's public key is not known. " +
+        'The nodes may not have exchanged node-info yet.',
+    ]);
   }
   if (s.critLogCount > 0) {
-    evtRows.push(['CRIT logs',
+    evtRows.push([
+      'CRIT logs',
       `<span class="sum-err">×${s.critLogCount} CRIT-level log lines</span>`,
-      s.lastCritLog ? `Last: ${s.lastCritLog}` :
-        'CRIT-level lines (queue overflow / unrecoverable storage failures)']);
+      s.lastCritLog ? `Last: ${s.lastCritLog}` : 'CRIT-level lines (queue overflow / unrecoverable storage failures)',
+    ]);
   }
   if (s.radioInitRetries > 0) {
     const rn = s.radioInitRetries;
     const plural = rn !== 1 ? 'ies' : '';
-    const errCode = s.radioInitError ? RADIOLIB_ERR[Number(s.radioInitError)] ?? s.radioInitError : '';
+    const errCode = s.radioInitError ? (RADIOLIB_ERR[Number(s.radioInitError)] ?? s.radioInitError) : '';
     const errStr = errCode ? ` (${errCode})` : '';
-    evtRows.push(['Radio init',
+    evtRows.push([
+      'Radio init',
       `<span class="sum-warn">×${rn} init retr${plural}${errStr}</span>`,
-      'Radio chip initialisation failed and was retried — usually SPI/power/TCXO instability.']);
+      'Radio chip initialisation failed and was retried — usually SPI/power/TCXO instability.',
+    ]);
   }
   if (s.startTransmitFailures > 0) {
-    const err = s.lastStartTransmitError ?
-      ` (${RADIOLIB_ERR[Number(s.lastStartTransmitError)] ?? s.lastStartTransmitError})` : '';
-    evtRows.push(['TX fail',
+    const err = s.lastStartTransmitError
+      ? ` (${RADIOLIB_ERR[Number(s.lastStartTransmitError)] ?? s.lastStartTransmitError})`
+      : '';
+    evtRows.push([
+      'TX fail',
       `<span class="sum-warn">×${s.startTransmitFailures} startTransmit failed${err}</span>`,
-      'RadioLib startTransmit() returned an error — the radio could not begin a transmission.']);
+      'RadioLib startTransmit() returned an error — the radio could not begin a transmission.',
+    ]);
   }
   if (s.radioStartReceiveErrors > 0) {
-    const err = s.lastStartReceiveError ?
-      ` (${RADIOLIB_ERR[Number(s.lastStartReceiveError)] ?? s.lastStartReceiveError})` : '';
-    evtRows.push(['RX start fail',
+    const err = s.lastStartReceiveError
+      ? ` (${RADIOLIB_ERR[Number(s.lastStartReceiveError)] ?? s.lastStartReceiveError})`
+      : '';
+    evtRows.push([
+      'RX start fail',
       `<span class="sum-warn">×${s.radioStartReceiveErrors} StartReceive error${err}</span>`,
-      'RadioIf StartReceive() returned an error — the radio could not be put back into RX mode.']);
+      'RadioIf StartReceive() returned an error — the radio could not be put back into RX mode.',
+    ]);
   }
   if (s.radioLibErrors.length > 0) {
-    const parts = s.radioLibErrors.map((e) => {
-      const name = RADIOLIB_ERR[e.code] ?? String(e.code);
-      return `${e.radio} ${e.op} ${name}`;
-    }).join(' · ');
-    evtRows.push(['RadioLib err',
+    const parts = s.radioLibErrors
+      .map((e) => {
+        const name = RADIOLIB_ERR[e.code] ?? String(e.code);
+        return `${e.radio} ${e.op} ${name}`;
+      })
+      .join(' · ');
+    evtRows.push([
+      'RadioLib err',
       `<span class="sum-warn">${parts}</span>`,
       'RadioLib returned error codes during radio operations. ' +
-      'SPI_CMD_FAILED (-707) is the most common and usually indicates SPI/TCXO instability.']);
+        'SPI_CMD_FAILED (-707) is the most common and usually indicates SPI/TCXO instability.',
+    ]);
   }
   if (s.fromRadioQOverflow > 0) {
-    evtRows.push(['RX queue',
+    evtRows.push([
+      'RX queue',
       `<span class="sum-warn">×${s.fromRadioQOverflow} fromRadioQ full — packets dropped</span>`,
       'The queue from the radio to the Router overflowed. ' +
-      'Usually caused by a burst of traffic faster than the Router can process.']);
+        'Usually caused by a burst of traffic faster than the Router can process.',
+    ]);
   }
   if (s.busyTxCount > 5) {
     const cls = s.busyTxCount > 20 ? 'sum-warn' : '';
     const txt = `×${s.busyTxCount} busyTx`;
-    evtRows.push(['busyTx', cls ? `<span class="${cls}">${txt}</span>` : txt,
-      'TX was attempted while the radio was already transmitting — indicates TX queue pressure.']);
+    evtRows.push([
+      'busyTx',
+      cls ? `<span class="${cls}">${txt}</span>` : txt,
+      'TX was attempted while the radio was already transmitting — indicates TX queue pressure.',
+    ]);
   }
   if (s.powerChipFailures.length > 0) {
-    evtRows.push(['Power chip',
+    evtRows.push([
+      'Power chip',
       `<span class="sum-warn">${s.powerChipFailures.join(', ')} init failed</span>`,
-      'Power management chip(s) failed to initialise — battery readings and charging control ' +
-      'may be unavailable.']);
+      'Power management chip(s) failed to initialise — battery readings and charging control ' + 'may be unavailable.',
+    ]);
   }
   if (s.gpsNotDetected) {
-    evtRows.push(['GPS', 'not detected — marked absent for this boot',
-      'No GNSS module was found during probing or the probe was given up. GPS is disabled.']);
+    evtRows.push([
+      'GPS',
+      'not detected — marked absent for this boot',
+      'No GNSS module was found during probing or the probe was given up. GPS is disabled.',
+    ]);
   }
   if (s.tcxoFallbackToXtal) {
-    evtRows.push(['TCXO→XTAL',
+    evtRows.push([
+      'TCXO→XTAL',
       '<span class="sum-warn">radio fell back to XTAL oscillator mode</span>',
       'TCXO init failed; radio is running on a crystal oscillator. ' +
-      'Expect increased frequency drift, temperature-dependent SNR degradation, and a higher freq offset.']);
+        'Expect increased frequency drift, temperature-dependent SNR degradation, and a higher freq offset.',
+    ]);
   }
   if (s.gpsSearchFailures > 0) {
-    const consec = s.gpsConsecutiveLockFailures !== undefined ?
-      ` · ${s.gpsConsecutiveLockFailures} consecutive` : '';
+    const consec = s.gpsConsecutiveLockFailures !== undefined ? ` · ${s.gpsConsecutiveLockFailures} consecutive` : '';
     const cls = (s.gpsConsecutiveLockFailures ?? 0) > 3 ? 'sum-warn' : 'sum-note';
-    evtRows.push(['GPS search',
+    evtRows.push([
+      'GPS search',
       `<span class="${cls}">×${s.gpsSearchFailures} ended without fix${consec}</span>`,
       'GPS searches timed out without acquiring a fix. Rising consecutive-failure count means ' +
-      'the chip is blind — check antenna, sky view, and baud rate.']);
+        'the chip is blind — check antenna, sky view, and baud rate.',
+    ]);
   }
   if ((s.gpsChecksumFailTotal ?? 0) > 0) {
     const delta = s.gpsChecksumFailDelta !== undefined ? ` (+${s.gpsChecksumFailDelta} new)` : '';
-    evtRows.push(['GPS checksum',
+    evtRows.push([
+      'GPS checksum',
       `<span class="sum-warn">×${s.gpsChecksumFailTotal} NMEA checksum failures${delta}</span>`,
-      'NMEA sentence checksum mismatches — EMI, loose wiring, or baud rate mismatch.']);
+      'NMEA sentence checksum mismatches — EMI, loose wiring, or baud rate mismatch.',
+    ]);
   }
   if (s.gpsBufferFullEvents > 0) {
     const bytes = s.gpsBufferFullBytes !== undefined ? ` · ${s.gpsBufferFullBytes}B pending` : '';
-    evtRows.push(['GPS buffer',
+    evtRows.push([
+      'GPS buffer',
       `<span class="sum-warn">×${s.gpsBufferFullEvents} UART buffer full${bytes}</span>`,
-      'GPS UART buffer overran — CPU could not drain it fast enough. Correlate with task-watchdog events.']);
+      'GPS UART buffer overran — CPU could not drain it fast enough. Correlate with task-watchdog events.',
+    ]);
   }
   if (s.gpsFrameErrors > 0) {
     const baud = s.gpsFrameErrorBaud ? ` at ${s.gpsFrameErrorBaud} baud` : '';
-    evtRows.push(['GPS framing',
+    evtRows.push([
+      'GPS framing',
       `<span class="sum-warn">×${s.gpsFrameErrors} UBlox frame error${baud}</span>`,
-      'UBlox framing errors indicate a baud rate mismatch between firmware and GPS module.']);
+      'UBlox framing errors indicate a baud rate mismatch between firmware and GPS module.',
+    ]);
   }
   if (s.gpsStaleDataEvents > 0) {
-    evtRows.push(['GPS stale',
+    evtRows.push([
+      'GPS stale',
       `×${s.gpsStaleDataEvents} stale-data event`,
-      'GPS position or time data aged out before a fresh fix arrived.']);
+      'GPS position or time data aged out before a fresh fix arrived.',
+    ]);
   }
   if (s.gpsBogusValueRejects > 0) {
-    evtRows.push(['GPS bogus',
+    evtRows.push([
+      'GPS bogus',
       `×${s.gpsBogusValueRejects} bogus NMEA value rejected`,
-      'HDOP or course values were out of range and discarded — malformed NMEA sentences.']);
+      'HDOP or course values were out of range and discarded — malformed NMEA sentences.',
+    ]);
   }
   if (s.gpsConfigNacks > 0) {
     const msgs = s.gpsNackedMessages.length > 0 ? ` (${s.gpsNackedMessages.join(', ')})` : '';
-    evtRows.push(['GPS NACK',
+    evtRows.push([
+      'GPS NACK',
       `<span class="sum-warn">×${s.gpsConfigNacks} config NACKed${msgs}</span>`,
-      'The GPS module rejected config commands. Module may be running on defaults (wrong rate/constellation).']);
+      'The GPS module rejected config commands. Module may be running on defaults (wrong rate/constellation).',
+    ]);
   }
   if (s.gpsConfigTimeouts > 0) {
     const msgs = s.gpsTimedOutMessages.length > 0 ? ` (${s.gpsTimedOutMessages.join(', ')})` : '';
-    evtRows.push(['GPS timeout',
+    evtRows.push([
+      'GPS timeout',
       `<span class="sum-warn">×${s.gpsConfigTimeouts} config no response${msgs}</span>`,
-      'GPS module did not respond to config commands — communication problem or wrong baud.']);
+      'GPS module did not respond to config commands — communication problem or wrong baud.',
+    ]);
   }
   if (s.gpsAtgmConfigFailures > 0) {
-    evtRows.push(['ATGM config',
+    evtRows.push([
+      'ATGM config',
       `<span class="sum-warn">×${s.gpsAtgmConfigFailures} ATGM336H config failure</span>`,
-      'ATGM336H could not be configured — NMEA rate, constellation, or update frequency not set.']);
+      'ATGM336H could not be configured — NMEA rate, constellation, or update frequency not set.',
+    ]);
   }
   if (s.gpsConfigSaveFailed) {
-    evtRows.push(['GNSS save',
+    evtRows.push([
+      'GNSS save',
       '<span class="sum-warn">unable to save GNSS module config</span>',
-      'Configuration save to the GNSS module failed — settings will not persist across power cycles.']);
+      'Configuration save to the GNSS module failed — settings will not persist across power cycles.',
+    ]);
   }
   if (s.gpsDefaultsMaintained) {
-    evtRows.push(['GNSS defaults',
+    evtRows.push([
+      'GNSS defaults',
       '<span class="sum-warn">reconfigure refused — defaults maintained</span>',
       'GNSS module refused constellation reconfiguration; likely a GPS-only module. ' +
-      'Multi-constellation config will not take effect.']);
+        'Multi-constellation config will not take effect.',
+    ]);
   }
   if (s.gpsProbeCacheStale) {
-    evtRows.push(['GPS cache',
+    evtRows.push([
+      'GPS cache',
       `stale probe cleared${s.gpsStaleProbe ? ` (was ${s.gpsStaleProbe})` : ''}`,
-      'Cached GPS module identity was stale and cleared; a fresh probe will run.']);
+      'Cached GPS module identity was stale and cleared; a fresh probe will run.',
+    ]);
   }
   if (s.gpsNoLockPublishFailures > 0) {
-    evtRows.push(['GPS pub fail',
+    evtRows.push([
+      'GPS pub fail',
       `×${s.gpsNoLockPublishFailures} publish skipped (no lock)`,
-      'Position publish was skipped because no GPS lock was acquired in time.']);
+      'Position publish was skipped because no GPS lock was acquired in time.',
+    ]);
   }
   if (s.packetHistoryCorrupt) {
-    evtRows.push(['Pkt history',
+    evtRows.push([
+      'Pkt history',
       '<span class="sum-warn">invalid size — reset to default</span>',
-      'The packet deduplication history had an invalid size and was reset.']);
+      'The packet deduplication history had an invalid size and was reset.',
+    ]);
   }
   if (s.encryptedStorageLockedSkips > 0) {
-    evtRows.push(['Storage locked',
+    evtRows.push([
+      'Storage locked',
       `<span class="sum-warn">×${s.encryptedStorageLockedSkips} saves skipped (locked)</span>`,
       'Encrypted storage was locked — save operations were skipped. ' +
-      'Settings written during lockout are not persisted.']);
+        'Settings written during lockout are not persisted.',
+    ]);
   }
   if (s.unsafePowerSaveBlocked > 0) {
-    evtRows.push(['Low-power save',
+    evtRows.push([
+      'Low-power save',
       `<span class="sum-warn">×${s.unsafePowerSaveBlocked} save blocked (unsafe voltage)</span>`,
-      'Settings save was refused because battery voltage was too low. ' +
-      'Config changes may not survive this reboot.']);
+      'Settings save was refused because battery voltage was too low. ' + 'Config changes may not survive this reboot.',
+    ]);
   }
   if (s.adcErrors > 0) {
-    evtRows.push(['ADC',
+    evtRows.push([
+      'ADC',
       `<span class="sum-warn">×${s.adcErrors} ADC init/calibration error</span>`,
-      'ADC initialisation or calibration failed — battery percentage readings may be unreliable.']);
+      'ADC initialisation or calibration failed — battery percentage readings may be unreliable.',
+    ]);
   }
   if (s.missingPrefs.length > 0) {
-    evtRows.push(['Prefs (opt)',
+    evtRows.push([
+      'Prefs (opt)',
       `${s.missingPrefs.join(', ')} not found — defaults used`,
       'Optional preference files were missing; defaults were installed. ' +
-      'Normal on first boot; on an existing device may indicate UI config loss.']);
+        'Normal on first boot; on an existing device may indicate UI config loss.',
+    ]);
   }
   if (s.scheduledReboot) {
-    evtRows.push(['Reboot sched',
+    evtRows.push([
+      'Reboot sched',
       `rebooting in ${s.scheduledRebootSecs ?? '?'} s`,
-      'The firmware scheduled a deliberate reboot (e.g. after a firmware update or config change).']);
+      'The firmware scheduled a deliberate reboot (e.g. after a firmware update or config change).',
+    ]);
   }
   if (s.enteredDfuMode) {
-    evtRows.push(['DFU mode',
+    evtRows.push([
+      'DFU mode',
       '<span class="sum-warn">device entered DFU (firmware update) mode</span>',
-      'The device rebooted into DFU mode for a firmware update. Log ends here.']);
+      'The device rebooted into DFU mode for a firmware update. Log ends here.',
+    ]);
   }
   if (s.regionPresetSwap) {
-    const {preset, from, to} = s.regionPresetSwap;
-    evtRows.push(['Region swap',
+    const { preset, from, to } = s.regionPresetSwap;
+    evtRows.push([
+      'Region swap',
       `${preset}: ${from} → ${to}`,
-      `The ${preset} preset automatically swapped the region from ${from} to ${to}.`]);
+      `The ${preset} preset automatically swapped the region from ${from} to ${to}.`,
+    ]);
   }
   if (s.configCoerced) {
-    evtRows.push(['Config coerce',
+    evtRows.push([
+      'Config coerce',
       'telemetry/position intervals coerced to role-aware minimum',
-      'Config values were below the minimum allowed for the node role and were raised automatically.']);
+      'Config values were below the minimum allowed for the node role and were raised automatically.',
+    ]);
   }
   if (s.unsupported24GhzReverted) {
-    evtRows.push(['2.4 GHz',
+    evtRows.push([
+      '2.4 GHz',
       '<span class="sum-warn">chip does not support 2.4 GHz — region reverted to UNSET</span>',
-      'A 2.4 GHz frequency was configured but the radio chip does not support it; region was reset.']);
+      'A 2.4 GHz frequency was configured but the radio chip does not support it; region was reset.',
+    ]);
   }
   if (s.rxSensitivityPatchFailed) {
-    evtRows.push(['RX patch',
+    evtRows.push([
+      'RX patch',
       '<span class="sum-warn">0x8B5 RX sensitivity patch failed</span>',
       'The SX126x RX sensitivity workaround (register 0x8B5 patch) could not be applied. ' +
-      'Receive sensitivity may be degraded.']);
+        'Receive sensitivity may be degraded.',
+    ]);
   }
   if (s.loraErrorRecoveries > 0) {
-    evtRows.push(['LoRa recovery',
+    evtRows.push([
+      'LoRa recovery',
       `×${s.loraErrorRecoveries} LoRa-in-error recovery attempted`,
-      'The firmware detected a LoRa radio error and attempted to recover without rebooting.']);
+      'The firmware detected a LoRa radio error and attempted to recover without rebooting.',
+    ]);
   }
   if (s.agcCalibFailures > 0) {
-    evtRows.push(['AGC calib',
+    evtRows.push([
+      'AGC calib',
       `<span class="sum-warn">×${s.agcCalibFailures} calibration timeout</span>`,
-      'AGC calibration reset timed out — indicates radio hardware stress or SPI instability.']);
+      'AGC calibration reset timed out — indicates radio hardware stress or SPI instability.',
+    ]);
   }
   if (s.missedTxDone > 0 || s.missedRxDone > 0) {
     const parts: string[] = [];
     if (s.missedTxDone > 0) parts.push(`TX_DONE ×${s.missedTxDone}`);
     if (s.missedRxDone > 0) parts.push(`RX_DONE ×${s.missedRxDone}`);
-    evtRows.push(['Missed IRQ',
+    evtRows.push([
+      'Missed IRQ',
       parts.join(' · '),
       'Radio interrupts were missed (caught and recovered). Occasional occurrences are normal; ' +
-      'frequent misses indicate IRQ latency or SPI contention.']);
+        'frequent misses indicate IRQ latency or SPI contention.',
+    ]);
   }
   if (s.rxInterruptWrongMode > 0) {
-    evtRows.push(['RX ISR',
+    evtRows.push([
+      'RX ISR',
       `<span class="sum-warn">×${s.rxInterruptWrongMode} ISR wrong mode</span>`,
       'handleReceiveInterrupt was called while the radio was not in RX mode — ' +
-      'indicates a radio state desync that may cause missed packets.']);
+        'indicates a radio state desync that may cause missed packets.',
+    ]);
   }
   if (s.espSleepErrors > 0) {
-    evtRows.push(['Sleep err',
+    evtRows.push([
+      'Sleep err',
       `<span class="sum-warn">×${s.espSleepErrors} ESP sleep API error</span>`,
       'esp_light_sleep_start or esp_sleep_enable_*_wakeup returned a non-zero result. ' +
-      'Power consumption may be higher than expected.']);
+        'Power consumption may be higher than expected.',
+    ]);
   }
   if (s.retransmissions > 0 || s.naksReceived > 0) {
     const parts: string[] = [];
     if (s.retransmissions > 0) parts.push(`${s.retransmissions} retx`);
     if (s.naksReceived > 0) parts.push(`${s.naksReceived} NAK rcvd`);
-    evtRows.push(['Retransmit', parts.join(' · '),
+    evtRows.push([
+      'Retransmit',
+      parts.join(' · '),
       'Reliable-send retransmissions and NAKs received from peers. ' +
-      'High counts indicate poor link quality or congestion.']);
+        'High counts indicate poor link quality or congestion.',
+    ]);
   }
 
   // ── Sensor / module diagnostics ──────────────────────────────────────────
 
   if (s.sensorsDropped.length > 0) {
-    evtRows.push(['Sensor drop',
+    evtRows.push([
+      'Sensor drop',
       `<span class="sum-warn">${s.sensorsDropped.join(', ')} dropped — can't connect</span>`,
       'Sensor detected on I2C scan but driver could not communicate with it. ' +
-      'Check wiring, I2C address, and module variant.']);
+        'Check wiring, I2C address, and module variant.',
+    ]);
   }
   if (s.sensorErrors.length > 0) {
     const parts = s.sensorErrors.map((e) => {
       const code = e.code !== undefined ? ` (${e.code})` : '';
       return `${e.sensor}: ${e.op}${code}`;
     });
-    evtRows.push(['Sensor error',
+    evtRows.push([
+      'Sensor error',
       `<span class="sum-warn">${parts.join(' · ')}</span>`,
-      'I2C sensor driver failed an operation. Distinct sensor+op pairs shown; ' +
-      'repeated failures are deduplicated.']);
+      'I2C sensor driver failed an operation. Distinct sensor+op pairs shown; ' + 'repeated failures are deduplicated.',
+    ]);
   }
   if (s.sensorReadFailures > 0) {
-    evtRows.push(['Sensor read',
+    evtRows.push([
+      'Sensor read',
       `<span class="sum-warn">×${s.sensorReadFailures} incomplete read</span>`,
-      'Sensor returned fewer bytes than expected — intermittent bus fault.']);
+      'Sensor returned fewer bytes than expected — intermittent bus fault.',
+    ]);
   }
   if (s.sensorChecksumFailures > 0) {
-    evtRows.push(['Sensor CRC',
+    evtRows.push([
+      'Sensor CRC',
       `<span class="sum-warn">×${s.sensorChecksumFailures} checksum mismatch</span>`,
       'Sensor CRC/checksum errors — EMI, loose wiring, or bus contention. ' +
-      'Pairs with GPS checksum failures if it is a board-wide bus issue.']);
+        'Pairs with GPS checksum failures if it is a board-wide bus issue.',
+    ]);
   }
   if (s.sensorFrameErrors > 0) {
-    evtRows.push(['Sensor frame',
+    evtRows.push([
+      'Sensor frame',
       `<span class="sum-warn">×${s.sensorFrameErrors} frame header invalid</span>`,
-      'Sensor sent an unrecognised frame header — driver/chip mismatch or partial read.']);
+      'Sensor sent an unrecognised frame header — driver/chip mismatch or partial read.',
+    ]);
   }
   if (s.sensorClockConflict.length > 0) {
-    evtRows.push(['I2C clock',
+    evtRows.push([
+      'I2C clock',
       `<span class="sum-warn">${s.sensorClockConflict.join(', ')} disabled (screen clock conflict)</span>`,
-      'Display forces a slower I2C clock speed that the sensor cannot use. Sensor is disabled.']);
+      'Display forces a slower I2C clock speed that the sensor cannot use. Sensor is disabled.',
+    ]);
   }
   if (s.sensorCalibSaveFailed) {
-    evtRows.push(['Sensor calib',
+    evtRows.push([
+      'Sensor calib',
       '<span class="sum-warn">calibration / state file save failed</span>',
-      'BSEC2 or sensor calibration state could not be saved — calibration restarts on next boot.']);
+      'BSEC2 or sensor calibration state could not be saved — calibration restarts on next boot.',
+    ]);
   }
   if (Object.keys(s.telemetryDecodeErrors).length > 0) {
     const parts = Object.entries(s.telemetryDecodeErrors)
-        .map(([k, n]) => `${k}×${n}`).join(' · ');
-    evtRows.push(['TM decode',
+      .map(([k, n]) => `${k}×${n}`)
+      .join(' · ');
+    evtRows.push([
+      'TM decode',
       `<span class="sum-warn">${parts} decode error</span>`,
-      'Telemetry protobuf decode failed — packet corruption or firmware mismatch.']);
+      'Telemetry protobuf decode failed — packet corruption or firmware mismatch.',
+    ]);
   }
   if (s.adminConfigSaveFailed || s.configSaveFailures > 0) {
-    evtRows.push(['Config save',
+    evtRows.push([
+      'Config save',
       `<span class="sum-warn">×${s.configSaveFailures} config change not saved to disk</span>`,
       'Admin-applied config change was accepted but not persisted. ' +
-      'Device will revert to previous config on reboot.']);
+        'Device will revert to previous config on reboot.',
+    ]);
   }
   if (s.adminDroppedStorageLocked > 0) {
-    evtRows.push(['Admin drop',
+    evtRows.push([
+      'Admin drop',
       `<span class="sum-warn">×${s.adminDroppedStorageLocked} admin payload dropped (storage locked)</span>`,
-      'AdminModule discarded an incoming config payload because storage was locked.']);
+      'AdminModule discarded an incoming config payload because storage was locked.',
+    ]);
   }
   if (s.adminNoSessionKey > 0) {
-    evtRows.push(['Admin auth',
+    evtRows.push([
+      'Admin auth',
       `<span class="sum-warn">×${s.adminNoSessionKey} admin message without session key</span>`,
-      'Admin command arrived with no session key — could indicate an older client or replay.']);
+      'Admin command arrived with no session key — could indicate an older client or replay.',
+    ]);
   }
   if (s.unsignedNodeInfoDropped > 0) {
     const nodes = s.nodeKeyDowngrade.length > 0 ? ` (${s.nodeKeyDowngrade.join(', ')})` : '';
-    const kdSpan = `<span class="sum-err">×${s.unsignedNodeInfoDropped}` +
+    const kdSpan =
+      `<span class="sum-err">×${s.unsignedNodeInfoDropped}` +
       ` unsigned NodeInfo from previously-signing node${nodes}</span>`;
-    evtRows.push(['Key downgrade', kdSpan,
-      'A node that previously signed its NodeInfo sent an unsigned packet — possible key downgrade or spoof.']);
+    evtRows.push([
+      'Key downgrade',
+      kdSpan,
+      'A node that previously signed its NodeInfo sent an unsigned packet — possible key downgrade or spoof.',
+    ]);
   }
   if (s.nodeInfoLicensedMismatch) {
-    evtRows.push(['NodeInfo mismatch',
+    evtRows.push([
+      'NodeInfo mismatch',
       '<span class="sum-warn">is_licensed flag mismatch</span>',
-      'A NodeInfo packet had an invalid is_licensed state.']);
+      'A NodeInfo packet had an invalid is_licensed state.',
+    ]);
   }
   if (s.keyVerificationFailures > 0) {
-    evtRows.push(['Key verify',
+    evtRows.push([
+      'Key verify',
       `<span class="sum-warn">×${s.keyVerificationFailures} Hash2 mismatch</span>`,
-      'Key verification (Hash2) failed — possible MitM or tampered packet.']);
+      'Key verification (Hash2) failed — possible MitM or tampered packet.',
+    ]);
   }
   if (s.storeForwardPsramFull) {
-    evtRows.push(['S&F PSRAM',
+    evtRows.push([
+      'S&F PSRAM',
       '<span class="sum-warn">PSRAM full — oldest messages overwritten</span>',
-      'Store & Forward buffer exhausted; oldest messages were overwritten by newer ones.']);
+      'Store & Forward buffer exhausted; oldest messages were overwritten by newer ones.',
+    ]);
   }
   if (s.tracerouteErrors > 0) {
-    evtRows.push(['TraceRoute',
+    evtRows.push([
+      'TraceRoute',
       `×${s.tracerouteErrors} alloc/null/self error`,
-      'TraceRoute module encountered allocation, null-service, or self-route errors.']);
+      'TraceRoute module encountered allocation, null-service, or self-route errors.',
+    ]);
   }
   if (s.detectionMisconfigured) {
-    evtRows.push(['Detection mod',
+    evtRows.push([
+      'Detection mod',
       '<span class="sum-warn">no monitor pin set — module disabled</span>',
-      'Detection Sensor Module has no GPIO monitor pin configured. Module will not function.']);
+      'Detection Sensor Module has no GPIO monitor pin configured. Module will not function.',
+    ]);
   }
   if (s.femLnaUnsupported) {
-    evtRows.push(['FEM LNA',
+    evtRows.push([
+      'FEM LNA',
       '<span class="sum-warn">LNA mode configured but FEM does not support it</span>',
-      'FEM LNA control was requested but the detected FEM chip does not support it.']);
+      'FEM LNA control was requested but the detected FEM chip does not support it.',
+    ]);
   }
   if (s.invalidSerialConfig) {
-    evtRows.push(['Serial mod', '<span class="sum-warn">invalid serial module config</span>',
-      'Serial module config was rejected as invalid. Module may not start.']);
+    evtRows.push([
+      'Serial mod',
+      '<span class="sum-warn">invalid serial module config</span>',
+      'Serial module config was rejected as invalid. Module may not start.',
+    ]);
   }
 
   // ── Nodes seen ──────────────────────────────────────────────────────────────
@@ -3137,32 +3607,37 @@ export function renderSummary(s: DeviceSummary): string {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  const img = s.deviceImage ?
-    `<img class="device-img" src="/img/devices/${s.deviceImage}" alt="${hwLabel}">` : '';
+  const img = s.deviceImage ? `<img class="device-img" src="/img/devices/${s.deviceImage}" alt="${hwLabel}">` : '';
 
   function renderRow([label, value, tooltip]: [string, string, string?]): string {
     if (!label && !value) return ''; // skip spacer rows
     const tt = tooltip ? ` data-tooltip="${tooltip.replace(/"/g, '&quot;')}"` : '';
-    return `<div class="sum-row"${tt}><span class="sum-label">${label}</span>` +
-      `<span class="sum-value">${value}</span></div>`;
+    return (
+      `<div class="sum-row"${tt}><span class="sum-label">${label}</span>` +
+      `<span class="sum-value">${value}</span></div>`
+    );
   }
 
   const memDivider = memRows.length ? '<div class="sum-divider">MEMORY</div>' : '';
   const modDivider = modRows.length ? '<div class="sum-divider">MODULE STATUS</div>' : '';
   const evtDivider = evtRows.length ? '<div class="sum-divider sum-divider-err">EVENTS</div>' : '';
   const totalNodes = sortedNodes.length;
-  const nodeDivider = nodeRows.length ?
-    `<div class="sum-divider">NODES SEEN (${totalNodes})</div>` : '';
+  const nodeDivider = nodeRows.length ? `<div class="sum-divider">NODES SEEN (${totalNodes})</div>` : '';
 
   // Remove the spacer row we added earlier (it was a placeholder for the divider)
   const filteredRows = rows.filter(([l, v]) => l !== '' || v !== '');
 
-  const grid = '<div class="sum-grid">' +
+  const grid =
+    '<div class="sum-grid">' +
     filteredRows.map(renderRow).join('') +
-    memDivider + memRows.map(renderRow).join('') +
-    modDivider + modRows.map(renderRow).join('') +
-    evtDivider + evtRows.map(renderRow).join('') +
-    nodeDivider + nodeRows.map(renderRow).join('') +
+    memDivider +
+    memRows.map(renderRow).join('') +
+    modDivider +
+    modRows.map(renderRow).join('') +
+    evtDivider +
+    evtRows.map(renderRow).join('') +
+    nodeDivider +
+    nodeRows.map(renderRow).join('') +
     '</div>';
 
   return img + grid;
@@ -3186,16 +3661,21 @@ function xmlEscape(s: string): string {
 }
 
 export function renderChannelHashChart(s: DeviceSummary): string {
-  const hashes = [...new Set([
-    ...Object.keys(s.rxChannelHashCounts),
-    ...Object.keys(s.decodedChannelHashCounts),
-    ...Object.keys(s.txChannelHashCounts),
-  ])].sort((a, b) => Number(a) - Number(b));
+  const hashes = [
+    ...new Set([
+      ...Object.keys(s.rxChannelHashCounts),
+      ...Object.keys(s.decodedChannelHashCounts),
+      ...Object.keys(s.txChannelHashCounts),
+    ]),
+  ].sort((a, b) => Number(a) - Number(b));
   if (hashes.length === 0) return '';
 
   const W = 290;
   const H = 110;
-  const pL = 22; const pB = 22; const pT = 8; const pR = 6;
+  const pL = 22;
+  const pB = 22;
+  const pT = 8;
+  const pR = 6;
   const cW = W - pL - pR;
   const cH = H - pT - pB;
   const n = hashes.length;
@@ -3217,42 +3697,55 @@ export function renderChannelHashChart(s: DeviceSummary): string {
     const tH = (tx[i] / maxVal) * cH;
     const g: string[] = [];
     // Transparent full-column hit area so the hover tooltip covers the whole group.
-    g.push(`<rect x="${(pL + i * groupW).toFixed(1)}" y="${pT}" ` +
-      `width="${groupW.toFixed(1)}" height="${cH}" fill="transparent"/>`);
+    g.push(
+      `<rect x="${(pL + i * groupW).toFixed(1)}" y="${pT}" ` +
+        `width="${groupW.toFixed(1)}" height="${cH}" fill="transparent"/>`,
+    );
     if (rH > 0) {
       const ry = (pT + cH - rH).toFixed(1);
-      g.push(`<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
-        `height="${rH.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`);
+      g.push(
+        `<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
+          `height="${rH.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`,
+      );
     }
     if (dH > 0) {
       const dy = (pT + cH - dH).toFixed(1);
-      g.push(`<rect x="${(gx + barW).toFixed(1)}" y="${dy}" width="${barW.toFixed(1)}" ` +
-        `height="${dH.toFixed(1)}" fill="#38bdf8" opacity="0.85" rx="1"/>`);
+      g.push(
+        `<rect x="${(gx + barW).toFixed(1)}" y="${dy}" width="${barW.toFixed(1)}" ` +
+          `height="${dH.toFixed(1)}" fill="#38bdf8" opacity="0.85" rx="1"/>`,
+      );
     }
     if (uH > 0) {
       const uy = (pT + cH - dH - uH).toFixed(1);
-      g.push(`<rect x="${(gx + barW).toFixed(1)}" y="${uy}" width="${barW.toFixed(1)}" ` +
-        `height="${uH.toFixed(1)}" fill="#7dd3fc" opacity="0.75" rx="1"/>`);
+      g.push(
+        `<rect x="${(gx + barW).toFixed(1)}" y="${uy}" width="${barW.toFixed(1)}" ` +
+          `height="${uH.toFixed(1)}" fill="#7dd3fc" opacity="0.75" rx="1"/>`,
+      );
     }
     if (tH > 0) {
       const ty = (pT + cH - tH).toFixed(1);
-      g.push(`<rect x="${(gx + 2 * barW).toFixed(1)}" y="${ty}" width="${barW.toFixed(1)}" ` +
-        `height="${tH.toFixed(1)}" fill="#a78bfa" opacity="0.75" rx="1"/>`);
+      g.push(
+        `<rect x="${(gx + 2 * barW).toFixed(1)}" y="${ty}" width="${barW.toFixed(1)}" ` +
+          `height="${tH.toFixed(1)}" fill="#a78bfa" opacity="0.75" rx="1"/>`,
+      );
     }
     const lx = (gx + barW * 1.5).toFixed(1);
     const ly = (pT + cH + 14).toFixed(1);
-    g.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">` +
-      `${hashes[i]}</text>`);
+    g.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">` + `${hashes[i]}</text>`);
     const hint = publicChannelHint(Number(hashes[i]));
-    const title = `Ch ${hashes[i]} — heard ${rx[i]}, decoded ${dec[i]}, ` +
+    const title =
+      `Ch ${hashes[i]} — heard ${rx[i]}, decoded ${dec[i]}, ` +
       `dup ${dup[i]}, sent ${tx[i]}` +
       (hint ? `\nPossible public channels:\n${hint}` : '\n(no known public preset)');
     parts.push(`<g><title>${xmlEscape(title)}</title>${g.join('')}</g>`);
   }
 
-  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
-    parts.join('') + `</svg>`;
-  const legend = `<div class="hc-legend">` +
+  const svg =
+    `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') +
+    `</svg>`;
+  const legend =
+    `<div class="hc-legend">` +
     `<span class="hc-dot" style="background:#67EA94"></span>heard` +
     `<span class="hc-dot" style="background:#38bdf8;margin-left:8px"></span>decoded` +
     `<span class="hc-dot" style="background:#7dd3fc;margin-left:8px"></span>dup` +
@@ -3279,11 +3772,10 @@ export function renderNodeStatusTile(s: DeviceSummary): string {
   }
   if (s.uptime !== undefined) rows.push(['Uptime', fmtUptime(s.uptime)]);
   if (rows.length === 0) return '';
-  const body = rows.map(([k, v]) =>
-    `<div class="ns-row"><span class="ns-k">${k}</span><span class="ns-v">${v}</span></div>`,
-  ).join('');
-  return `<div class="hc-section"><div class="hc-label">Node status</div>` +
-    `<div class="ns-tile">${body}</div></div>`;
+  const body = rows
+    .map(([k, v]) => `<div class="ns-row"><span class="ns-k">${k}</span><span class="ns-v">${v}</span></div>`)
+    .join('');
+  return `<div class="hc-section"><div class="hc-label">Node status</div>` + `<div class="ns-tile">${body}</div></div>`;
 }
 
 // Two overlaid lines (online + total mesh nodes) over the recorded samples.
@@ -3293,7 +3785,10 @@ export function renderNodeCountChart(s: DeviceSummary): string {
   if (hist.length < 2) return '';
   const W = 290;
   const H = 110;
-  const pL = 22; const pB = 22; const pT = 8; const pR = 6;
+  const pL = 22;
+  const pB = 22;
+  const pT = 8;
+  const pR = 6;
   const cW = W - pL - pR;
   const cH = H - pT - pB;
   const n = hist.length;
@@ -3309,9 +3804,12 @@ export function renderNodeCountChart(s: DeviceSummary): string {
   parts.push(line('total', '#a78bfa'));
   parts.push(line('online', '#67EA94'));
 
-  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
-    parts.join('') + `</svg>`;
-  const legend = `<div class="hc-legend">` +
+  const svg =
+    `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') +
+    `</svg>`;
+  const legend =
+    `<div class="hc-legend">` +
     `<span class="hc-dot" style="background:#67EA94"></span>online` +
     `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>total</div>`;
   return `<div class="hc-section"><div class="hc-label">Mesh nodes over time</div>${svg}${legend}</div>`;
@@ -3322,7 +3820,7 @@ function svgGridLine(x1: number, x2: number, y: number): string {
   return `<line x1="${x1}" x2="${x2}" y1="${ys}" y2="${ys}" stroke="#374151" stroke-width="0.5"/>`;
 }
 
-function svgGridLabel(x: number, y: number, text: string|number): string {
+function svgGridLabel(x: number, y: number, text: string | number): string {
   const tx = x.toFixed(1);
   const ty = (y + 3).toFixed(1);
   return `<text x="${tx}" y="${ty}" text-anchor="end" font-size="8" fill="#6b7280">${text}</text>`;
@@ -3343,7 +3841,10 @@ function renderGridLines(pL: number, cW: number, pT: number, cH: number, maxVal:
 function hopBarChart(base: number[], scaled: number[]): string {
   const W = 290;
   const H = 110;
-  const pL = 22; const pB = 22; const pT = 8; const pR = 6;
+  const pL = 22;
+  const pB = 22;
+  const pT = 8;
+  const pR = 6;
   const cW = W - pL - pR;
   const cH = H - pT - pB;
   const n = base.length;
@@ -3362,22 +3863,29 @@ function hopBarChart(base: number[], scaled: number[]): string {
     const sH = (sv / maxVal) * cH;
     if (bH > 0) {
       const ry = (pT + cH - bH).toFixed(1);
-      parts.push(`<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
-        `height="${bH.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`);
+      parts.push(
+        `<rect x="${gx.toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
+          `height="${bH.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`,
+      );
     }
     if (sH > 0) {
       const ry = (pT + cH - sH).toFixed(1);
-      parts.push(`<rect x="${(gx + barW).toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
-        `height="${sH.toFixed(1)}" fill="#a78bfa" opacity="0.75" rx="1"/>`);
+      parts.push(
+        `<rect x="${(gx + barW).toFixed(1)}" y="${ry}" width="${barW.toFixed(1)}" ` +
+          `height="${sH.toFixed(1)}" fill="#a78bfa" opacity="0.75" rx="1"/>`,
+      );
     }
     const lx = (gx + barW).toFixed(1);
     const ly = (pT + cH + 14).toFixed(1);
     parts.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">${i}</text>`);
   }
 
-  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
-    parts.join('') + `</svg>`;
-  const legend = `<div class="hc-legend">` +
+  const svg =
+    `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') +
+    `</svg>`;
+  const legend =
+    `<div class="hc-legend">` +
     `<span class="hc-dot" style="background:#67EA94"></span>base` +
     `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>scaled</div>`;
   return `<div class="hc-section"><div class="hc-label">Nodes per hop</div>${svg}${legend}</div>`;
@@ -3386,7 +3894,10 @@ function hopBarChart(base: number[], scaled: number[]): string {
 function hopLineChart(data: number[]): string {
   const W = 290;
   const H = 110;
-  const pL = 22; const pB = 22; const pT = 8; const pR = 6;
+  const pL = 22;
+  const pB = 22;
+  const pT = 8;
+  const pR = 6;
   const cW = W - pL - pR;
   const cH = H - pT - pB;
   const pts = [...data].reverse();
@@ -3419,8 +3930,10 @@ function hopLineChart(data: number[]): string {
     parts.push(`<text x="${cx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">${label}</text>`);
   }
 
-  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
-    parts.join('') + `</svg>`;
+  const svg =
+    `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') +
+    `</svg>`;
   return `<div class="hc-section"><div class="hc-label">Scaled seen / hour</div>${svg}</div>`;
 }
 
@@ -3430,16 +3943,16 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
   const entries = Object.entries(s.seenNodes);
   if (entries.length === 0) return '';
 
-  const allHashes = [...new Set(
-      entries.flatMap(([, ns]) => Object.keys(ns.channels)),
-  )].sort((a, b) => Number(a) - Number(b));
+  const allHashes = [...new Set(entries.flatMap(([, ns]) => Object.keys(ns.channels)))].sort(
+    (a, b) => Number(a) - Number(b),
+  );
 
   const sections: string[] = [];
 
   for (const hash of allHashes) {
     const channelNodes = entries
-        .filter(([, ns]) => (ns.channels[hash] ?? 0) > 0)
-        .sort(([, a], [, b]) => (b.channels[hash] ?? 0) - (a.channels[hash] ?? 0));
+      .filter(([, ns]) => (ns.channels[hash] ?? 0) > 0)
+      .sort(([, a], [, b]) => (b.channels[hash] ?? 0) - (a.channels[hash] ?? 0));
     if (channelNodes.length === 0) continue;
 
     const hint = publicChannelHint(Number(hash));
@@ -3449,7 +3962,8 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
     const chDup = s.dupChannelHashCounts[hash] ?? 0;
     const statsStr = ` · ${chRx} heard · ${chDec} decoded · ${chDup} dup`;
 
-    const hdr = `<tr class="node-hdr">` +
+    const hdr =
+      `<tr class="node-hdr">` +
       `<th>Node</th><th title="Heard on this channel">Heard</th>` +
       `<th title="Total decoded packets from this node">Decoded</th>` +
       `<th title="Relay-echo duplicates from this node">Dup</th>` +
@@ -3458,21 +3972,25 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
       `<th>RSSI</th><th>SNR</th>` +
       `<th title="Channel index 0-7 from the last decoded packet">Ch#</th></tr>`;
 
-    const rowsHtml = channelNodes.map(([nodeId, ns]) => {
-      const chHeard = ns.channels[hash] ?? 0;
-      const avg = ns.hopCount > 0 ? (ns.hopSum / ns.hopCount).toFixed(1) : '—';
-      const min = isFinite(ns.hopMin) ? String(ns.hopMin) : '—';
-      const rssi = ns.lastRssi !== undefined ? String(ns.lastRssi) : '—';
-      const snr = ns.lastSnr !== undefined ? ns.lastSnr.toFixed(1) : '—';
-      const chIdx = ns.lastChannelIndex !== undefined ? String(ns.lastChannelIndex) : '—';
-      return `<tr><td><code>${nodeId}</code></td>` +
-        `<td>${chHeard}</td><td>${ns.decoded}</td><td>${ns.dup}</td>` +
-        `<td>${avg}</td><td>${min}</td>` +
-        `<td>${rssi}</td><td>${snr}</td><td>${chIdx}</td></tr>`;
-    }).join('');
+    const rowsHtml = channelNodes
+      .map(([nodeId, ns]) => {
+        const chHeard = ns.channels[hash] ?? 0;
+        const avg = ns.hopCount > 0 ? (ns.hopSum / ns.hopCount).toFixed(1) : '—';
+        const min = isFinite(ns.hopMin) ? String(ns.hopMin) : '—';
+        const rssi = ns.lastRssi !== undefined ? String(ns.lastRssi) : '—';
+        const snr = ns.lastSnr !== undefined ? ns.lastSnr.toFixed(1) : '—';
+        const chIdx = ns.lastChannelIndex !== undefined ? String(ns.lastChannelIndex) : '—';
+        return (
+          `<tr><td><code>${nodeId}</code></td>` +
+          `<td>${chHeard}</td><td>${ns.decoded}</td><td>${ns.dup}</td>` +
+          `<td>${avg}</td><td>${min}</td>` +
+          `<td>${rssi}</td><td>${snr}</td><td>${chIdx}</td></tr>`
+        );
+      })
+      .join('');
 
     sections.push(
-        `<div class="hc-section">` +
+      `<div class="hc-section">` +
         `<div class="hc-label">NODES ON Ch ${hash}${hintStr}${statsStr}</div>` +
         `<div class="node-table-wrap">` +
         `<table class="node-table">${hdr}${rowsHtml}</table>` +
