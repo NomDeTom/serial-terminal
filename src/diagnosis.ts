@@ -1,76 +1,11 @@
 import { DeviceSummary } from './deviceSummary';
+import { routingErrorName, routingErrorMeaning } from './routingError';
+import { radioLibErrorFmt } from './radioLibError';
+import { criticalErrorFmt } from './criticalError';
 
 interface Finding {
   title: string;
   detail?: string;
-}
-
-// RadioLib TypeDef.h codes reachable on SX126x/LR11x0/LR2021/RF95 Meshtastic paths.
-// Source: coverage-additional.md §RadioLib error reference.
-const RADIOLIB_NAME: Record<number, string> = {
-  [-2]: 'CHIP_NOT_FOUND', // Radio not on SPI bus; wiring or dead chip
-  [-3]: 'MEMORY_ALLOCATION_FAILED', // Heap exhaustion during radio init
-  [-5]: 'TX_TIMEOUT', // TX never asserted done; antenna/RF fault
-  [-6]: 'RX_TIMEOUT', // RX window elapsed, often benign
-  [-7]: 'CRC_MISMATCH', // Corrupted reception; noise/antenna/interference
-  [-16]: 'SPI_WRITE_FAILED', // SPI readback mismatch; bus integrity problem
-  [-703]: 'INVALID_TCXO_VOLTAGE', // TCXO Vref out of range; triggers XTAL fallback
-  [-705]: 'SPI_CMD_TIMEOUT', // Radio stopped responding; busy line / power / clock
-  [-706]: 'SPI_CMD_INVALID', // SPI framing wrong; bus corruption or wrong chip
-  [-707]: 'SPI_CMD_FAILED', // Dominant real-world fault; SPI/TCXO/power-rail instability
-  [-1300]: 'FRONTEND_CALIBRATION_FAILED', // LR11x0/LR2021 RF front-end calibration failure
-  [-1301]: 'INVALID_SIDE_DETECT', // LR11x0 FEM/antenna routing mismatch
-};
-
-// meshtastic/protobufs CriticalErrorCode enum (mesh.proto / mesh.pb.h).
-// Source: coverage-additional.md §CriticalError crosswalk.
-const CRIT_ERR_NAME: Record<number, string> = {
-  1: 'TX_WATCHDOG', // TX never completed; pairs with radioBusyTxHardwareFailure
-  2: 'SLEEP_ENTER_WAIT', // Timed out waiting to enter sleep
-  3: 'NO_RADIO', // No radio hardware found on bus at all
-  4: 'UNSPECIFIED',
-  5: 'UBLOX_UNIT_FAILED', // GPS (ublox) init failure
-  6: 'NO_AXP192', // Expected AXP192 PMIC not present
-  7: 'INVALID_RADIO_SETTING', // Most common in corpus; bad coding rate / SF / preset
-  8: 'TRANSMIT_FAILED', // Transmit attempt failed
-  9: 'BROWNOUT', // Supply voltage fell below ~2.4 V threshold
-  10: 'SX1262_FAILURE', // SX1262 radio failure
-  11: 'RADIO_SPI_BUG', // Known SPI bug condition tripped
-  12: 'FLASH_CORRUPTION_RECOVERABLE',
-  13: 'FLASH_CORRUPTION_UNRECOVERABLE',
-};
-
-// NAK error names (from NAK_ERROR_NAMES in logSummary.ts) with plain-English meanings.
-// Sources: Router.cpp (perhapsEncode/send/sendLocal), ReliableRouter.cpp, NextHopRouter.cpp,
-//          MeshModule.cpp, AdminModule.cpp, PhoneAPI.cpp
-const NAK_MEANINGS: Record<string, string> = {
-  NO_ROUTE: 'no known path to that destination in routing table',
-  GOT_NAK: 'destination node returned an explicit NAK',
-  TIMEOUT: 'no ACK or NAK received within the retry window',
-  NO_INTERFACE: 'no radio interface available to transmit (Router.cpp sendLocal)',
-  MAX_RETRANSMIT: '3 retransmissions exhausted with no response (NextHopRouter.cpp)',
-  NO_CHANNEL:
-    'channel hash lookup failed — channel disabled or packet undecryptable (Router.cpp perhapsEncode / ReliableRouter.cpp)',
-  TOO_LARGE: 'encoded payload exceeds MAX_LORA_PAYLOAD_LEN for this modem preset (Router.cpp perhapsEncode)',
-  NO_RESPONSE: 'packet had want_ack but no module claimed it (MeshModule.cpp)',
-  DUTY_CYCLE_LIMIT: 'hourly TX% exceeds regional duty-cycle limit — transmit suppressed (Router.cpp send)',
-  BAD_REQUEST: 'malformed or invalid packet/admin command (Router.cpp send / AdminModule.cpp)',
-  NOT_AUTHORIZED: 'request came from non-admin node or channel (MeshModule.cpp / AdminModule.cpp)',
-  PKI_FAILED:
-    'PKI encryption failed — client-supplied key mismatches stored key, or pki_encrypted forced but unusable (Router.cpp perhapsEncode)',
-  PKI_UNKNOWN_PUBKEY:
-    'received PKI-encrypted packet but sender public key is unknown — cannot decrypt (ReliableRouter.cpp)',
-  ADMIN_BAD_SESSION_KEY: 'admin session key in packet does not match established session (AdminModule.cpp)',
-  ADMIN_PUBLIC_KEY_UNAUTHORIZED: 'sender public key not in the authorised admin key list (AdminModule.cpp)',
-  RATE_LIMIT_EXCEEDED: 'client sending packets faster than the phone API rate limit allows (PhoneAPI.cpp)',
-  PKI_SEND_FAIL_PUBLIC_KEY: 'PKI DM attempted but no public key stored for destination node (Router.cpp perhapsEncode)',
-};
-
-function rlibFmt(code: number): string {
-  return RADIOLIB_NAME[code] ? `${RADIOLIB_NAME[code]} (${code})` : `unknown (${code})`;
-}
-function critFmt(code: number): string {
-  return CRIT_ERR_NAME[code] ? `${CRIT_ERR_NAME[code]} (${code})` : `unknown (${code})`;
 }
 
 function esc(str: string): string {
@@ -195,7 +130,7 @@ export function renderDiagnosis(s: DeviceSummary): string {
         : 'A persisted protobuf could not be written to flash';
     const outcome =
       f.critCode !== undefined
-        ? ` Flash reformat + retry was attempted and the firmware recorded ${critFmt(f.critCode)}.`
+        ? ` Flash reformat + retry was attempted and the firmware recorded ${criticalErrorFmt(f.critCode)}.`
         : f.retried
           ? ' Flash reformat + retry was attempted.'
           : '';
@@ -318,10 +253,10 @@ export function renderDiagnosis(s: DeviceSummary): string {
     const n = s.criticalErrors.length;
     const decoded = s.criticalErrors
       .slice(0, 3)
-      .map((e) => `${critFmt(e.code)} @ ${e.file}:${e.line}`)
+      .map((e) => `${criticalErrorFmt(e.code)} @ ${e.file}:${e.line}`)
       .join('; ');
     crit.push({
-      title: `Critical firmware error${n > 1 ? 's' : ''}: ${critFmt(s.criticalErrors[0].code)}`,
+      title: `Critical firmware error${n > 1 ? 's' : ''}: ${criticalErrorFmt(s.criticalErrors[0].code)}`,
       detail: decoded + (n > 3 ? ` +${n - 3} more` : ''),
     });
   }
@@ -573,7 +508,7 @@ export function renderDiagnosis(s: DeviceSummary): string {
     const n = s.radioLibErrors.length;
     const decoded = s.radioLibErrors
       .slice(0, 3)
-      .map((e) => `${e.radio} ${e.op} → ${rlibFmt(e.code)}`)
+      .map((e) => `${e.radio} ${e.op} → ${radioLibErrorFmt(e.code)}`)
       .join('; ');
     warn.push({
       title: `RadioLib errors (${n} event${n !== 1 ? 's' : ''})`,
@@ -641,11 +576,12 @@ export function renderDiagnosis(s: DeviceSummary): string {
   const totalNaks = Object.values(s.nakErrors).reduce((a, b) => a + b, 0);
   if (totalNaks > 30) {
     const top = Object.entries(s.nakErrors).sort(([, a], [, b]) => b - a)[0];
-    const meaning = top ? (NAK_MEANINGS[top[0]] ?? 'unknown') : '';
+    const topName = top ? routingErrorName(Number(top[0])) : '';
+    const meaning = top ? (routingErrorMeaning(Number(top[0])) ?? 'unknown') : '';
     warn.push({
       title: `Excessive NAK errors (${totalNaks} total)`,
       detail:
-        (top ? `Most frequent: ${top[0]} × ${top[1]} — ${meaning}. ` : '') +
+        (top ? `Most frequent: ${topName} (${top[0]}) × ${top[1]} — ${meaning}. ` : '') +
         'NAK codes: NO_ROUTE = no path to dest, MAX_RETRANSMIT = 3 attempts failed, ' +
         'TIMEOUT = no reply within window, DUTY_CYCLE_LIMIT = transmit suppressed, ' +
         'NO_CHANNEL = channel disabled/undecryptable, BAD_REQUEST = malformed packet, ' +

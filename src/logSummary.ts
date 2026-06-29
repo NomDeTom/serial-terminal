@@ -562,7 +562,10 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (/[Dd]uty.?[Cc]ycle limit/.test(line)) s.dutyCycleHits++;
   },
 
-  // "Error=N, return NAK" / "Alloc an err=N,to=…"
+  // NAK (Routing.Error) codes. Two firmware LOG strings carry the numeric code:
+  //   "Error=%d, return NAK and drop packet" — Router.cpp abortSendAndNak()
+  //   "Alloc an err=%d,to=…"                  — MeshModule.cpp allocAckNak()
+  // Code → name/meaning live in routingError.ts (see mesh.pb.h _meshtastic_Routing_Error).
   (line, s) => {
     let m = line.match(/Error=(\d+),\s*return NAK/);
     if (!m) m = line.match(/Alloc an err=(\d+)/);
@@ -739,7 +742,12 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (!s.assertLocations.includes(loc)) s.assertLocations.push(loc);
   },
 
-  // "[Router] NOTE! Record critical error N at FILE:N"
+  // CriticalErrorCode — emitted by recordCriticalError() (NodeDB.cpp) via RECORD_CRITICALERROR macro:
+  //   NodeDB.cpp:3811  LOG_ERROR("NOTE! Record critical error %d at %s:%lu", code, filename, address)
+  //   NodeDB.cpp:3813  LOG_ERROR("NOTE! Record critical error %d, address=0x%lx", code, address)
+  // Only the "at FILE:LINE" form (NodeDB.cpp:3811) is captured here — it provides a source location
+  // to deduplicate on. The address-only form (NodeDB.cpp:3813) is not captured.
+  // Code → name/meaning live in criticalError.ts (see mesh.pb.h _meshtastic_CriticalErrorCode).
   (line, s) => {
     const m = line.match(/Record critical error (\d+) at (\S+):(\d+)/);
     if (!m) return;
@@ -750,7 +758,12 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     }
   },
 
-  // "X init failed with -N (CODE), retrying" / "X init failed with TCXO Vref N V (err -N), retrying"
+  // Radio init retry — two log forms, both from LR11x0/LR20x0 init paths:
+  //   LR11x0Interface.cpp:102  LOG_WARN("LR11x0 init failed with %d (SPI_CMD_FAILED), retrying after delay...")
+  //   LR11x0Interface.cpp:110  LOG_WARN("LR11x0 init failed with TCXO Vref %f V (err %d), retrying without TCXO")
+  //   LR20x0Interface.cpp:118/126 — identical forms for LR20x0.
+  // The TCXO branch fires when INVALID_TCXO_VOLTAGE (-703) is returned; driver falls back to XTAL
+  // (see TCXO/oscillator matcher). Code → name live in radioLibError.ts.
   (line, s) => {
     const m = line.match(
         /(\w+) init failed with (?:TCXO Vref [\d.]+ V \(err (-?\d+)\)|(-?\d+)).*retry/i
@@ -761,10 +774,13 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (m[2] !== undefined) s.tcxoInitFailed = true;
   },
 
-  // "No SX1262 radio with TCXO, Vref 1.800000V" / "No SX1262 radio with XTAL, Vref 0.0V"
-  // The fitted radio's own driver gave up after every init attempt — it never answered on
-  // the SPI bus. Distinct from the expected "No RF95 radio" probe (other drivers built in
-  // but not fitted), which has no "with TCXO/XTAL" suffix.
+  // Configured radio not found after exhausting all init retries:
+  //   RadioInterface.cpp:435  LOG_WARN("No SX1262 radio with TCXO, Vref %fV", SX126X_DIO3_TCXO_VOLTAGE)
+  //   RadioInterface.cpp:448  LOG_WARN("No SX1262 radio with XTAL, Vref 0.0V")
+  //   RadioInterface.cpp:465  LOG_WARN("No SX1268 radio with TCXO, Vref %fV")
+  // The "with TCXO/XTAL" suffix distinguishes this from the normal probe misses ("No RF95 radio"
+  // etc. — RadioInterface.cpp:401/418/477/504/518/532/546/559) where the driver was compiled in
+  // but is simply not the fitted chip; those have no TCXO/XTAL suffix and are expected.
   (line, s) => {
     const m = line.match(/No (\S+) radio with (?:TCXO|XTAL)/);
     if (!m) return;
@@ -772,8 +788,11 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     s.configuredRadioMissingName = s.configuredRadioMissingName ?? m[1];
   },
 
-  // "[RadioIf] SX126X scanChannel RadioLib err=-1" — channel-activity (CAD) scan never
-  // completes. CAD completion is delivered over the radio IRQ line (DIO1).
+  // CAD (channel-activity detection) scan failure — completion is delivered over DIO1 IRQ;
+  // a RadioLib error here means the scan never completed or returned an error code.
+  //   SX126xInterface.cpp:368  LOG_ERROR("SX126X scanChannel %s%d", radioLibErr, result)
+  //   LR11x0Interface.cpp:302 / LR20x0Interface.cpp:309 / RF95Interface.cpp:312 /
+  //   SX128xInterface.cpp:291 — all call lora.scanChannel() and use radioLibErr prefix.
   (line, s) => {
     if (/scanChannel RadioLib err=/.test(line)) s.scanChannelFailures++;
   },
@@ -795,7 +814,14 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (/Started Tx \(|Completed sending \(/.test(line)) s.txCompleted++;
   },
 
-  // "[RadioIf] StartReceive error: -N"
+  // RX restart failure — radio could not be returned to receive mode:
+  //   LR11x0Interface.cpp:277  LOG_ERROR("StartReceive error: %d", err)
+  //   LR20x0Interface.cpp:284  LOG_ERROR("StartReceive error: %d", err)
+  // The SX126x and RF95 forms use the "RadioLib err=" prefix and are captured by the generic
+  // radioLibErrors matcher (#121) instead:
+  //   SX126xInterface.cpp:334  LOG_ERROR("SX126X startReceiveDutyCycleAuto %s%d", radioLibErr, err)
+  //   RF95Interface.cpp:296    LOG_ERROR("RF95 startReceive %s%d", radioLibErr, err)
+  // Code → name live in radioLibError.ts.
   (line, s) => {
     const m = line.match(/\[RadioIf\] StartReceive error:\s*(-?\d+)/);
     if (!m) return;
@@ -942,7 +968,17 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
 
   // ── Source-derived: RadioLib driver surface (#121–#128) ───────────────────
 
-  // Generic RadioLib op failure: "SX1262 startReceive RadioLib err=-707"
+  // Generic RadioLib op failure. Drivers build the log line using the shared prefix constant:
+  //   RadioLibInterface.h:337  const char* radioLibErr = "RadioLib err=";
+  // producing e.g. "SX126X setSyncWord RadioLib err=-707". Emit sites:
+  //   SX126xInterface.cpp:231  setSyncWord, :241 setPreambleLength, :255 setOutputPower,
+  //                            :261 setRxBoostedGainMode, :334 startReceiveDutyCycleAuto,
+  //                            :368 scanChannel
+  //   RF95Interface.cpp:226    setSyncWord, :231 setCurrentLimit, :236 setPreambleLength,
+  //                            :272 standby, :296 startReceive, :319 isChannelActive
+  //   LR11x0Interface.cpp:211  setRxBoostedGainMode
+  //   LR20x0Interface.cpp:217  setRxBoostedGainMode
+  // Code → name/meaning live in radioLibError.ts.
   (line, s) => {
     const m = line.match(
         /(SX126[0-9xX]+|LR11x0|LR2021|RF95|STM32WL|LLCC68) (\w+) RadioLib err=(-?\d+)/
@@ -955,14 +991,16 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     }
   },
 
-  // "Hardware Failure! busyTx for more than 60s" — radio wedged in TX
+  // RadioLibInterface.cpp:107  LOG_ERROR("Hardware Failure! busyTx for more than 60s")
+  // TX busy line held for >60 s — radio wedged; pairs with CriticalErrorCode TX_WATCHDOG (1).
   (line, s) => {
     if (/Hardware Failure! busyTx for more than 60s/.test(line)) {
       s.radioBusyTxHardwareFailure = true;
     }
   },
 
-  // "startTransmit failed, error=N"
+  // RadioLibInterface.cpp:694  LOG_ERROR("startTransmit failed, error=%d", res)
+  // Code → name live in radioLibError.ts.
   (line, s) => {
     const m = line.match(/startTransmit failed, error=(-?\d+)/);
     if (!m) return;
@@ -970,17 +1008,20 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     s.lastStartTransmitError = m[1];
   },
 
-  // "caught missed RX_DONE"
+  // RadioLibInterface.cpp:653  LOG_WARN("caught missed RX_DONE")
+  // IRQ fired but DIO1 pin was already low when ISR ran — DIO1 toggled too fast to catch.
   (line, s) => {
     if (/caught missed RX_DONE/.test(line)) s.missedRxDone++;
   },
 
-  // "handleReceiveInterrupt called when not in rx mode" — ISR / state desync
+  // RadioLibInterface.cpp:536  LOG_ERROR("handleReceiveInterrupt called when not in rx mode, which shouldn't happen")
+  // ISR fired while the driver thought it was not in RX — state desync, usually follows SPI fault.
   (line, s) => {
     if (/handleReceiveInterrupt called when not in rx mode/.test(line)) s.rxInterruptWrongMode++;
   },
 
-  // "Reconfigure failed, rebooting" / "LoRa in error detected, attempting to recover"
+  // RadioInterface.cpp:575  LOG_WARN("Reconfigure failed, rebooting")
+  // main.cpp:1350            LOG_ERROR("LoRa in error detected, attempting to recover")
   (line, s) => {
     if (/Reconfigure failed, rebooting/.test(line)) {
       s.radioRecoveryReboot = true;
@@ -989,12 +1030,15 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     if (/LoRa in error detected, attempting to recover/.test(line)) s.loraErrorRecoveries++;
   },
 
-  // "does not support 2.4GHz. Revert to unset"
+  // RadioInterface.cpp:570  LOG_WARN("LoRa chip does not support 2.4GHz. Revert to unset")
   (line, s) => {
     if (/does not support 2\.4GHz\. Revert to unset/.test(line)) s.unsupported24GhzReverted = true;
   },
 
-  // "0x8B5 patch" / "0x8B5 RX sensitivity patch" — degraded RX sensitivity
+  // SX126xInterface.cpp:173  LOG_WARN("Failed to apply SX1262 register 0x8B5 patch for RX improvement")
+  // SX126xInterface.cpp:470  LOG_WARN("SX126x resetAGC: failed to re-apply 0x8B5 RX sensitivity patch")
+  // Register 0x8B5 bit 0 enables an undocumented RX sensitivity improvement; failure means the
+  // SPI write was rejected, so RX sensitivity is degraded.
   (line, s) => {
     if (/0x8B5 (?:patch|RX sensitivity patch)/.test(line)) s.rxSensitivityPatchFailed = true;
   },
@@ -1097,7 +1141,11 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   },
 
   // ── TCXO / oscillator (#141) ──────────────────────────────────────────────
-  // "LR11x0/LR20x0/SX… init success without TCXO (XTAL mode)"
+  // TCXO → XTAL fallback: INVALID_TCXO_VOLTAGE (-703) on first init triggers a retry without
+  // TCXO; on success the driver logs:
+  //   LR11x0Interface.cpp:114  LOG_INFO("LR11x0 init success without TCXO (XTAL mode)")
+  //   LR20x0Interface.cpp:130  LOG_INFO("LR20x0 init success without TCXO (XTAL mode)")
+  // The preceding failure line is captured by the radioInitRetries matcher (LR11x0Interface.cpp:110).
   (line, s) => {
     const m = line.match(/(LR11x0|LR20x0|SX\w+) init success without TCXO \(XTAL mode\)/);
     if (!m) return;

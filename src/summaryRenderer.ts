@@ -1,34 +1,9 @@
 import {DeviceSummary} from './deviceSummary';
 import {lookupReleaseDate} from './firmwareReleases';
 import {publicChannelHint} from './channelHashNames';
-
-// Routing.Error enum from meshtastic/protobufs mesh.proto
-const NAK_ERROR_NAMES: Record<number, string> = {
-  1: 'NO_ROUTE', 2: 'GOT_NAK', 3: 'TIMEOUT', 4: 'NO_INTERFACE',
-  5: 'MAX_RETRANSMIT', 6: 'NO_CHANNEL', 7: 'TOO_LARGE',
-  8: 'NO_RESPONSE', 9: 'DUTY_CYCLE_LIMIT',
-};
-
-// RadioLib error codes (TypeDef.h) — subset reachable on Meshtastic radio paths
-const RADIOLIB_ERR: Record<number, string> = {
-  [-2]: 'CHIP_NOT_FOUND', [-3]: 'MEMORY_ALLOCATION_FAILED',
-  [-4]: 'PACKET_TOO_LONG', [-5]: 'TX_TIMEOUT', [-6]: 'RX_TIMEOUT',
-  [-7]: 'CRC_MISMATCH', [-8]: 'INVALID_BANDWIDTH', [-9]: 'INVALID_SPREADING_FACTOR',
-  [-10]: 'INVALID_CODING_RATE', [-12]: 'INVALID_FREQUENCY', [-13]: 'INVALID_OUTPUT_POWER',
-  [-16]: 'SPI_WRITE_FAILED', [-18]: 'INVALID_PREAMBLE_LENGTH', [-19]: 'INVALID_GAIN',
-  [-20]: 'WRONG_MODEM', [-703]: 'INVALID_TCXO_VOLTAGE', [-704]: 'INVALID_MODULATION_PARAMETERS',
-  [-705]: 'SPI_CMD_TIMEOUT', [-706]: 'SPI_CMD_INVALID', [-707]: 'SPI_CMD_FAILED',
-  [-1300]: 'FRONTEND_CALIBRATION_FAILED', [-1301]: 'INVALID_SIDE_DETECT',
-};
-
-// CriticalErrorCode from meshtastic/protobufs mesh.proto / mesh.pb.h
-const CRIT_ERR: Record<number, string> = {
-  0: 'NONE', 1: 'TX_WATCHDOG', 2: 'SLEEP_ENTER_WAIT', 3: 'NO_RADIO',
-  4: 'UNSPECIFIED', 5: 'UBLOX_UNIT_FAILED', 6: 'NO_AXP192',
-  7: 'INVALID_RADIO_SETTING', 8: 'TRANSMIT_FAILED', 9: 'BROWNOUT',
-  10: 'SX1262_FAILURE', 11: 'RADIO_SPI_BUG',
-  12: 'FLASH_CORRUPTION_RECOVERABLE', 13: 'FLASH_CORRUPTION_UNRECOVERABLE',
-};
+import {routingErrorName} from './routingError';
+import {radioLibErrorName} from './radioLibError';
+import {criticalErrorName} from './criticalError';
 
 // ── Rendering helpers ──────────────────────────────────────────────────────────
 
@@ -496,8 +471,7 @@ export function renderSummary(s: DeviceSummary): string {
   }
   if (hasNak) {
     const parts = Object.entries(s.nakErrors).map(([code, count]) => {
-      const name = NAK_ERROR_NAMES[Number(code)] ?? `err${code}`;
-      return `${name} ×${count}`;
+      return `${routingErrorName(Number(code))} ×${count}`;
     }).join(' · ');
     evtRows.push(['NAK drops', `<span class="sum-warn">${parts}</span>`,
       'Packets rejected by the router — see Routing.Error enum in mesh.proto']);
@@ -663,7 +637,7 @@ export function renderSummary(s: DeviceSummary): string {
   }
   if (s.criticalErrors.length > 0) {
     const parts = s.criticalErrors.map((e) => {
-      const name = CRIT_ERR[e.code] ?? `code ${e.code}`;
+      const name = criticalErrorName(e.code) ?? `code ${e.code}`;
       return `${name} @ ${e.file}:${e.line}`;
     }).join(' · ');
     evtRows.push(['Critical error',
@@ -740,7 +714,7 @@ export function renderSummary(s: DeviceSummary): string {
   if (s.radioInitRetries > 0) {
     const rn = s.radioInitRetries;
     const plural = rn !== 1 ? 'ies' : '';
-    const errCode = s.radioInitError ? RADIOLIB_ERR[Number(s.radioInitError)] ?? s.radioInitError : '';
+    const errCode = s.radioInitError ? radioLibErrorName(Number(s.radioInitError)) ?? s.radioInitError : '';
     const errStr = errCode ? ` (${errCode})` : '';
     evtRows.push(['Radio init',
       `<span class="sum-warn">×${rn} init retr${plural}${errStr}</span>`,
@@ -748,21 +722,21 @@ export function renderSummary(s: DeviceSummary): string {
   }
   if (s.startTransmitFailures > 0) {
     const err = s.lastStartTransmitError ?
-      ` (${RADIOLIB_ERR[Number(s.lastStartTransmitError)] ?? s.lastStartTransmitError})` : '';
+      ` (${radioLibErrorName(Number(s.lastStartTransmitError)) ?? s.lastStartTransmitError})` : '';
     evtRows.push(['TX fail',
       `<span class="sum-warn">×${s.startTransmitFailures} startTransmit failed${err}</span>`,
       'RadioLib startTransmit() returned an error — the radio could not begin a transmission.']);
   }
   if (s.radioStartReceiveErrors > 0) {
     const err = s.lastStartReceiveError ?
-      ` (${RADIOLIB_ERR[Number(s.lastStartReceiveError)] ?? s.lastStartReceiveError})` : '';
+      ` (${radioLibErrorName(Number(s.lastStartReceiveError)) ?? s.lastStartReceiveError})` : '';
     evtRows.push(['RX start fail',
       `<span class="sum-warn">×${s.radioStartReceiveErrors} StartReceive error${err}</span>`,
       'RadioIf StartReceive() returned an error — the radio could not be put back into RX mode.']);
   }
   if (s.radioLibErrors.length > 0) {
     const parts = s.radioLibErrors.map((e) => {
-      const name = RADIOLIB_ERR[e.code] ?? String(e.code);
+      const name = radioLibErrorName(e.code) ?? String(e.code);
       return `${e.radio} ${e.op} ${name}`;
     }).join(' · ');
     evtRows.push(['RadioLib err',
