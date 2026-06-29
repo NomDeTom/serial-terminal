@@ -1,5 +1,0 @@
-export PATH="/c/Program Files/nodejs:$PATH"
-files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.ts$' || true)
-[ -z "$files" ] && exit 0
-echo "$files" | xargs node_modules/.bin/eslint --fix --max-warnings 0 || exit 1
-echo "$files" | xargs git add
