@@ -417,7 +417,7 @@ export function saveLog(): void {
   const rawLabel = (document.getElementById('log_label') as HTMLInputElement)?.value.trim() ?? '';
   const label = rawLabel ? '-' + rawLabel.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-') : '';
   const appendMeta = (document.getElementById('log_append_meta') as HTMLInputElement)?.checked ?? false;
-  const nodeId = s.summary.nodeId?.replace(/^0x/i, '') ?? '';
+  const nodeId = s.pii.enabled ? '' : (s.summary.nodeId?.replace(/^0x/i, '') ?? '');
   const buildHash = s.summary.firmware?.split('.').pop() ?? '';
   const meta = appendMeta && (nodeId || buildHash) ? '-' + [nodeId, buildHash].filter(Boolean).join('-') : '';
   a.download = `meshtastic-log-${new Date().toISOString().replace(/[:.]/g, '-')}${label}${meta}.txt`;
