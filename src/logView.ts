@@ -414,7 +414,9 @@ export function saveLog(): void {
   const blob = new Blob(['﻿', lines.join('\n')], {type: 'text/plain;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.download = `meshtastic-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+  const rawLabel = (document.getElementById('log_label') as HTMLInputElement)?.value.trim() ?? '';
+  const label = rawLabel ? '-' + rawLabel.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-') : '';
+  a.download = `meshtastic-log-${new Date().toISOString().replace(/[:.]/g, '-')}${label}.txt`;
   a.href = url;
   a.click();
   URL.revokeObjectURL(url);
