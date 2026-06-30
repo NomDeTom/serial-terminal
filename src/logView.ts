@@ -416,7 +416,11 @@ export function saveLog(): void {
   const a = document.createElement('a');
   const rawLabel = (document.getElementById('log_label') as HTMLInputElement)?.value.trim() ?? '';
   const label = rawLabel ? '-' + rawLabel.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-') : '';
-  a.download = `meshtastic-log-${new Date().toISOString().replace(/[:.]/g, '-')}${label}.txt`;
+  const appendMeta = (document.getElementById('log_append_meta') as HTMLInputElement)?.checked ?? false;
+  const nodeId = s.summary.nodeId?.replace(/^0x/i, '') ?? '';
+  const buildHash = s.summary.firmware?.split('.').pop() ?? '';
+  const meta = appendMeta && (nodeId || buildHash) ? '-' + [nodeId, buildHash].filter(Boolean).join('-') : '';
+  a.download = `meshtastic-log-${new Date().toISOString().replace(/[:.]/g, '-')}${label}${meta}.txt`;
   a.href = url;
   a.click();
   URL.revokeObjectURL(url);
