@@ -11,7 +11,7 @@ import {
 import {emptySummary} from './deviceSummary';
 import {
   addModuleButton, updateSearchCount, updatePiiButton, refreshInterest,
-  disposeDecorations, SEARCH_DECO,
+  disposeDecorations, discardPendingWrites, SEARCH_DECO,
 } from './logView';
 import {refreshSummary, syncBootToggle} from './statsView';
 import {refreshPanels} from './panels';
@@ -74,6 +74,7 @@ export function switchView(kind: 'serial' | 'file'): void {
 
 export function clearLog(): void {
   const s = active;
+  discardPendingWrites(s);
   s.lineHistory.length = 0;
   s.lineBuffer = '';
   s.pii.reset();

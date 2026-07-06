@@ -53,7 +53,18 @@ export interface Session {
   interestSeq: number;
   decorations: IDecoration[];
   decoMarkers: IMarker[];
-  scrollDebounce?: number;   // pending static-scroll timer id, if any
+  pendingWrites: PendingWrite[]; // lines held back by static scroll, not yet on-screen
+  pendingSince?: number;         // timestamp of the first held-back line in the batch
+  scrollDebounce?: number;       // pending static-scroll flush timer id, if any
+}
+
+// A line that passed filtering, waiting to be written once static scroll
+// decides the burst has settled.
+interface PendingWrite {
+  clean: string;
+  ann?: Annotation;
+  entry?: InterestEntry;
+  highlight?: boolean;
 }
 
 // Search decoration: highlight every match in amber; brighten the active one.
@@ -69,30 +80,55 @@ export const SEARCH_DECO = {
 let lineTip: HTMLElement | undefined;
 let autoscroll = true;
 
-// Static scroll: while lines arrive in a quick burst, hold the view still
-// instead of yanking it down after every line, then settle once the burst
-// pauses for STATIC_SCROLL_QUIET_MS. Makes regular lumps of entries (e.g. a
-// periodic telemetry batch) read as a single settle-and-shift rather than a
-// string of jerky scroll jumps.
+// Static scroll: while lines arrive in a quick burst, hold new lines back
+// instead of writing them straight to the terminal (which, at the bottom of
+// the buffer, makes xterm auto-advance the view on every single write — that
+// per-line advance is the jerkiness, not the explicit scrollToBottom() call).
+// Held-back lines are flushed together — written in one go and scrolled once
+// — either after the burst goes quiet for STATIC_SCROLL_QUIET_MS, or after
+// STATIC_SCROLL_MAX_MS regardless, so a steady trickle with no gaps doesn't
+// stall the display indefinitely.
 let staticScroll = false;
 const STATIC_SCROLL_QUIET_MS = 120;
+const STATIC_SCROLL_MAX_MS = 500;
 
-function cancelScrollDebounce(s: Session): void {
-  if (s.scrollDebounce === undefined) return;
-  clearTimeout(s.scrollDebounce);
-  s.scrollDebounce = undefined;
+// Drops any lines static scroll is holding back for `s` without writing them
+// — used when the terminal is about to be cleared or fully rebuilt from
+// lineHistory, so a stale queue doesn't write lines a second time (or write
+// lines that no longer exist) when its flush timer later fires.
+export function discardPendingWrites(s: Session): void {
+  if (s.scrollDebounce !== undefined) {
+    clearTimeout(s.scrollDebounce);
+    s.scrollDebounce = undefined;
+  }
+  s.pendingWrites = [];
+  s.pendingSince = undefined;
 }
 
-function scheduleScroll(s: Session): void {
-  if (!staticScroll) {
-    s.term.scrollToBottom();
-    return;
-  }
-  cancelScrollDebounce(s);
-  s.scrollDebounce = window.setTimeout(() => {
+// Writes and (if requested) scrolls whatever is queued for `s`, and cancels
+// any pending flush timer. Safe to call with an empty queue.
+function flushPendingWrites(s: Session, scroll: boolean): void {
+  if (s.scrollDebounce !== undefined) {
+    clearTimeout(s.scrollDebounce);
     s.scrollDebounce = undefined;
-    s.term.scrollToBottom();
-  }, STATIC_SCROLL_QUIET_MS);
+  }
+  if (s.pendingWrites.length) {
+    const writes = s.pendingWrites;
+    s.pendingWrites = [];
+    s.pendingSince = undefined;
+    for (const w of writes) writeAndDecorate(s, w.clean, w.ann, w.entry, w.highlight);
+  }
+  if (scroll) s.term.scrollToBottom();
+}
+
+function queueWrite(s: Session, w: PendingWrite): void {
+  const now = performance.now();
+  if (s.pendingWrites.length === 0) s.pendingSince = now;
+  s.pendingWrites.push(w);
+  if (s.scrollDebounce !== undefined) clearTimeout(s.scrollDebounce);
+  const elapsed = now - (s.pendingSince ?? now);
+  const wait = Math.min(STATIC_SCROLL_QUIET_MS, Math.max(0, STATIC_SCROLL_MAX_MS - elapsed));
+  s.scrollDebounce = window.setTimeout(() => flushPendingWrites(s, true), wait);
 }
 
 export function createSession(
@@ -126,7 +162,7 @@ export function createSession(
     searchTerm: '', searchFilter: false, highlightLines: false,
     seenModules: new Set(), hiddenModules: new Set(),
     interest: [], interestBySeq: new Map(), interestSeq: 0,
-    decorations: [], decoMarkers: [],
+    decorations: [], decoMarkers: [], pendingWrites: [],
   };
 }
 
@@ -382,8 +418,12 @@ export function addLine(s: Session, raw: string, deferRender = false): void {
   if (linePassesFilter(s, clean)) {
     const hl = s.highlightLines && !!s.searchTerm &&
       clean.toLowerCase().includes(s.searchTerm.toLowerCase());
-    writeAndDecorate(s, clean, ann, entry, hl);
-    if (autoscroll && !deferRender) scheduleScroll(s);
+    if (staticScroll && autoscroll && !deferRender) {
+      queueWrite(s, {clean, ann, entry, highlight: hl});
+    } else {
+      writeAndDecorate(s, clean, ann, entry, hl);
+      if (autoscroll && !deferRender) s.term.scrollToBottom();
+    }
   }
 }
 
@@ -399,6 +439,9 @@ export function resetFilters(s: Session): void {
 }
 
 export function rerender(s: Session): void {
+  // The loop below rebuilds the whole view from lineHistory, so drop any
+  // queued static-scroll lines first (see discardPendingWrites).
+  discardPendingWrites(s);
   disposeDecorations(s);
   s.term.clear();
   let ip = 0;
@@ -459,21 +502,14 @@ export function initAutoscroll(): void {
   dom.autoscrollBtn.addEventListener('click', () => {
     autoscroll = !autoscroll;
     dom.autoscrollBtn.classList.toggle('btn-active', autoscroll);
-    if (autoscroll) {
-      cancelScrollDebounce(active);
-      active.term.scrollToBottom();
-    }
+    flushPendingWrites(active, autoscroll);
   });
   dom.staticScrollBtn.addEventListener('click', () => {
     staticScroll = !staticScroll;
     dom.staticScrollBtn.classList.toggle('btn-active', staticScroll);
-    if (!staticScroll) {
-      cancelScrollDebounce(active);
-      if (autoscroll) active.term.scrollToBottom();
-    }
+    if (!staticScroll) flushPendingWrites(active, autoscroll);
   });
   document.getElementById('jump_bottom')!.addEventListener('click', () => {
-    cancelScrollDebounce(active);
-    active.term.scrollToBottom();
+    flushPendingWrites(active, true);
   });
 }

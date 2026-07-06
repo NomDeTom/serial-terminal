@@ -157,6 +157,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('search_next')!.addEventListener('click', () => {
     active.search.findNext(active.searchTerm, {caseSensitive: false, decorations: SEARCH_DECO});
   });
+  document.getElementById('search_clear')!.addEventListener('click', () => {
+    dom.logSearchInput.value = '';
+    active.searchTerm = '';
+    active.search.clearDecorations();
+    if (active.searchFilter || active.highlightLines) {
+      rerender(active);
+    } else {
+      updateSearchCount(active);
+    }
+    dom.logSearchInput.focus();
+  });
   dom.searchFilterBtn.addEventListener('click', () => {
     active.searchFilter = !active.searchFilter;
     dom.searchFilterBtn.classList.toggle('active', active.searchFilter);
