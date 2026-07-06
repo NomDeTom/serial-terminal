@@ -53,6 +53,7 @@ export interface Session {
   interestSeq: number;
   decorations: IDecoration[];
   decoMarkers: IMarker[];
+  scrollDebounce?: number;   // pending static-scroll timer id, if any
 }
 
 // Search decoration: highlight every match in amber; brighten the active one.
@@ -67,6 +68,32 @@ export const SEARCH_DECO = {
 
 let lineTip: HTMLElement | undefined;
 let autoscroll = true;
+
+// Static scroll: while lines arrive in a quick burst, hold the view still
+// instead of yanking it down after every line, then settle once the burst
+// pauses for STATIC_SCROLL_QUIET_MS. Makes regular lumps of entries (e.g. a
+// periodic telemetry batch) read as a single settle-and-shift rather than a
+// string of jerky scroll jumps.
+let staticScroll = false;
+const STATIC_SCROLL_QUIET_MS = 120;
+
+function cancelScrollDebounce(s: Session): void {
+  if (s.scrollDebounce === undefined) return;
+  clearTimeout(s.scrollDebounce);
+  s.scrollDebounce = undefined;
+}
+
+function scheduleScroll(s: Session): void {
+  if (!staticScroll) {
+    s.term.scrollToBottom();
+    return;
+  }
+  cancelScrollDebounce(s);
+  s.scrollDebounce = window.setTimeout(() => {
+    s.scrollDebounce = undefined;
+    s.term.scrollToBottom();
+  }, STATIC_SCROLL_QUIET_MS);
+}
 
 export function createSession(
     kind: 'serial' | 'file', container: HTMLElement, mount: HTMLElement): Session {
@@ -356,7 +383,7 @@ export function addLine(s: Session, raw: string, deferRender = false): void {
     const hl = s.highlightLines && !!s.searchTerm &&
       clean.toLowerCase().includes(s.searchTerm.toLowerCase());
     writeAndDecorate(s, clean, ann, entry, hl);
-    if (autoscroll && !deferRender) s.term.scrollToBottom();
+    if (autoscroll && !deferRender) scheduleScroll(s);
   }
 }
 
@@ -426,14 +453,27 @@ export function saveLog(): void {
   URL.revokeObjectURL(url);
 }
 
-// Autoscroll toggle + jump-to-bottom (state lives with the view it scrolls).
+// Autoscroll / static-scroll toggles + jump-to-bottom (state lives with the
+// view it scrolls).
 export function initAutoscroll(): void {
   dom.autoscrollBtn.addEventListener('click', () => {
     autoscroll = !autoscroll;
     dom.autoscrollBtn.classList.toggle('btn-active', autoscroll);
-    if (autoscroll) active.term.scrollToBottom();
+    if (autoscroll) {
+      cancelScrollDebounce(active);
+      active.term.scrollToBottom();
+    }
+  });
+  dom.staticScrollBtn.addEventListener('click', () => {
+    staticScroll = !staticScroll;
+    dom.staticScrollBtn.classList.toggle('btn-active', staticScroll);
+    if (!staticScroll) {
+      cancelScrollDebounce(active);
+      if (autoscroll) active.term.scrollToBottom();
+    }
   });
   document.getElementById('jump_bottom')!.addEventListener('click', () => {
+    cancelScrollDebounce(active);
     active.term.scrollToBottom();
   });
 }

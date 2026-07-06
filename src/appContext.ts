@@ -76,6 +76,7 @@ export interface Dom {
   bootSinceBtn: HTMLButtonElement;
   bootAllBtn: HTMLButtonElement;
   autoscrollBtn: HTMLButtonElement;
+  staticScrollBtn: HTMLButtonElement;
   piiButton: HTMLButtonElement;
 }
 
@@ -119,6 +120,7 @@ export function initDom(): void {
   dom.bootSinceBtn = document.getElementById('boot_since') as HTMLButtonElement;
   dom.bootAllBtn = document.getElementById('boot_all') as HTMLButtonElement;
   dom.autoscrollBtn = document.getElementById('autoscroll') as HTMLButtonElement;
+  dom.staticScrollBtn = document.getElementById('static_scroll') as HTMLButtonElement;
   dom.piiButton = document.getElementById('pii_toggle') as HTMLButtonElement;
 }
 
