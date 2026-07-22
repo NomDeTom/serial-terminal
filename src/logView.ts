@@ -19,6 +19,7 @@ import {DeviceSummary, emptySummary} from './deviceSummary';
 import {updateSummary, updateSummaryCumulative} from './logSummary';
 import {dom, active, switchInfoTab} from './appContext';
 import {refreshPanels} from './panels';
+import {isTeleplotDataLine} from './teleplot';
 
 const MAX_HISTORY = 10_000;
 
@@ -46,6 +47,8 @@ export interface Session {
   searchTerm: string;        // raw text from the search box
   searchFilter: boolean;     // when true, only lines matching searchTerm render
   highlightLines: boolean;   // when true, full-line decorations on matching lines
+  hideTeleplotLines: boolean; // when true, Teleplot data lines (">name:value") don't render
+                              // (still kept in lineHistory, so Save and the Teleplot tab are unaffected)
   seenModules: Set<string>;
   hiddenModules: Set<string>;
   interest: InterestEntry[];
@@ -88,7 +91,7 @@ let autoscroll = true;
 // — either after the burst goes quiet for STATIC_SCROLL_QUIET_MS, or after
 // STATIC_SCROLL_MAX_MS regardless, so a steady trickle with no gaps doesn't
 // stall the display indefinitely.
-let staticScroll = false;
+let staticScroll = true;
 const STATIC_SCROLL_QUIET_MS = 120;
 const STATIC_SCROLL_MAX_MS = 500;
 
@@ -159,7 +162,7 @@ export function createSession(
     lineHistory: [], lineBuffer: '',
     summary: emptySummary(), cumulative: emptySummary(), showAllBoots: false,
     levelFilter: new Set(['D', 'I', 'W', 'E', 'C']),
-    searchTerm: '', searchFilter: false, highlightLines: false,
+    searchTerm: '', searchFilter: false, highlightLines: false, hideTeleplotLines: false,
     seenModules: new Set(), hiddenModules: new Set(),
     interest: [], interestBySeq: new Map(), interestSeq: 0,
     decorations: [], decoMarkers: [], pendingWrites: [],
@@ -171,6 +174,7 @@ export function moduleKey(module: string): string {
 }
 
 function linePassesFilter(s: Session, line: string): boolean {
+  if (s.hideTeleplotLines && isTeleplotDataLine(line)) return false;
   const {level, module} = parseLine(line);
   if (level && !s.levelFilter.has(level)) return false;
   if (s.hiddenModules.has(moduleKey(module))) return false;
@@ -184,6 +188,7 @@ function countSearchMatches(s: Session): number {
   const lc = s.searchTerm.toLowerCase();
   let n = 0;
   for (const line of s.lineHistory) {
+    if (s.hideTeleplotLines && isTeleplotDataLine(line)) continue;
     const {level, module} = parseLine(line);
     if (level && !s.levelFilter.has(level)) continue;
     if (s.hiddenModules.has(moduleKey(module))) continue;
@@ -432,10 +437,12 @@ export function resetFilters(s: Session): void {
   s.hiddenModules.clear();
   s.searchFilter = false;
   s.highlightLines = false;
+  s.hideTeleplotLines = false;
   document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => b.classList.add('active'));
   document.querySelectorAll<HTMLButtonElement>('.module-btn').forEach((b) => b.classList.add('active'));
   dom.searchFilterBtn?.classList.remove('active');
   dom.highlightLinesBtn?.classList.remove('active');
+  dom.teleplotHideDataBtn?.classList.remove('btn-active');
 }
 
 export function rerender(s: Session): void {

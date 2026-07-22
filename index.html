@@ -700,6 +700,30 @@
     }
     .hc-range input { cursor: pointer; accent-color: var(--green); width: 11px; height: 11px; }
 
+    /* ── Teleplot content ── */
+    #teleplotContent { display: block; }
+    #teleplotContent a { color: var(--green); }
+    .tp-count { font-size: 10px; color: var(--muted); margin-left: auto; }
+    /* Click a chart tile to pin it at 2x size (teleplotView.ts toggles a
+       per-series Set and re-renders at double width/height). */
+    .tp-plot { cursor: pointer; outline: 1px solid transparent; outline-offset: 2px; border-radius: 4px; transition: outline-color 0.12s, background-color 0.12s; }
+    .tp-plot:hover { outline-color: var(--border); }
+    .tp-plot.tp-enlarged { outline: 1px solid var(--green); background: rgba(103,234,148,0.05); }
+    .workspace.analysis #teleplotContent .dp-charts .tp-plot.tp-enlarged { grid-column: span 2; grid-row: span 2; }
+
+    /* Teleplot focus mode: sidebar shows only the Teleplot pane, meshtastic
+       tabs and the (meshtastic-only) boot-scope toggle are hidden; the
+       filter-bar swaps its LEVEL/MODULE chips for the Teleplot "Hide Data"
+       toggle. display:contents keeps each group's children as direct flex
+       items of their parent (filter-bar's gap, info-header's gap) so grouping
+       them in a <span> doesn't add an extra box or break the layout. */
+    body.teleplot-focus #info_panel .info-tab:not([data-panel="teleplot"]) { display: none; }
+    body.teleplot-focus .boot-toggle { display: none; }
+    .fb-group { display: contents; }
+    .fb-group-teleplot { display: none; }
+    body.teleplot-focus .fb-group-mesh { display: none; }
+    body.teleplot-focus .fb-group-teleplot { display: contents; }
+
     /* Analysis mode: expand the info panel, shrink the serial log, tile the data.
        Gated on the panel actually being visible so closing it frees the terminal. */
     .workspace.analysis:has(#info_panel:not([hidden])) .term-wrap { flex: 0 0 340px; }
@@ -829,6 +853,7 @@
     <div id="statusDot" title="Serial connection status"></div>
     <button class="view-tab view-tab-big active" data-view="serial">Live Serial</button>
     <button class="view-tab view-tab-big" data-view="file">📄 File</button>
+    <button class="view-tab view-tab-big" id="teleplot_toggle" title="Focus the sidebar on Teleplot charts only">📈 Teleplot</button>
   </div>
 
   <!-- ── Row 2: mode controls (swaps with the view) ── -->
@@ -904,17 +929,23 @@
 
   <!-- ── Filter bar ── -->
   <div class="filter-bar">
-    <span class="filter-label">LEVEL</span>
-    <button class="level-btn active" data-level="D">DBG</button>
-    <button class="level-btn active" data-level="I">INF</button>
-    <button class="level-btn active" data-level="W">WRN</button>
-    <button class="level-btn active" data-level="E">ERR</button>
-    <button class="level-btn active" data-level="C">CRT</button>
-    <div class="sep"></div>
-    <span class="filter-label">MODULE</span>
-    <button id="module_all_none" class="module-btn active" title="Select all / none">±</button>
-    <div id="module_buttons" class="module-buttons"></div>
-    <div class="sep"></div>
+    <span class="fb-group fb-group-mesh">
+      <span class="filter-label">LEVEL</span>
+      <button class="level-btn active" data-level="D">DBG</button>
+      <button class="level-btn active" data-level="I">INF</button>
+      <button class="level-btn active" data-level="W">WRN</button>
+      <button class="level-btn active" data-level="E">ERR</button>
+      <button class="level-btn active" data-level="C">CRT</button>
+      <div class="sep"></div>
+      <span class="filter-label">MODULE</span>
+      <button id="module_all_none" class="module-btn active" title="Select all / none">±</button>
+      <div id="module_buttons" class="module-buttons"></div>
+      <div class="sep"></div>
+    </span>
+    <span class="fb-group fb-group-teleplot">
+      <button id="teleplot_hide_data" class="btn" title="Hide &gt;name:value Teleplot lines from the log view (still included when you Save)">🙈 Hide Data</button>
+      <div class="sep"></div>
+    </span>
     <span class="filter-label">SEARCH</span>
     <input id="log_search" class="log-search" type="search" placeholder="Search logs…" autocomplete="off" spellcheck="false">
     <button id="search_prev" class="search-nav-btn" title="Previous match (Shift+Enter)">▲</button>
@@ -927,7 +958,7 @@
     <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF <span class="pii-eg">lat=52.944 lon=-1.435</span></button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
       <button id="autoscroll" class="btn btn-active" title="Auto-scroll the log to the newest line">⤓ Autoscroll</button>
-      <button id="static_scroll" class="btn" title="Hold the view still while lines arrive in a burst, then settle once the burst pauses — avoids jerky scrolling when entries come in regular lumps">▦ Static Scroll</button>
+      <button id="static_scroll" class="btn btn-active" title="Hold the view still while lines arrive in a burst, then settle once the burst pauses — avoids jerky scrolling when entries come in regular lumps">▦ Static Scroll</button>
       <button id="jump_bottom" class="btn" title="Jump to the newest line">⮟ Bottom</button>
       <div class="sep"></div>
       <input id="log_label" type="text" placeholder="label…" title="Optional label appended to the saved filename" style="width:80px">
@@ -966,6 +997,7 @@
         <button class="info-tab" data-panel="interest">INTEREST <span class="info-tab-dot" id="interest_dot"></span></button>
         <button class="info-tab" data-panel="data">DATA <span class="info-tab-dot" id="data_dot"></span></button>
         <button class="info-tab" data-panel="diagnosis">DIAG <span class="info-tab-dot" id="diagnosis_dot"></span></button>
+        <button class="info-tab" data-panel="teleplot" title="Teleplot">TELE <span class="info-tab-dot" id="teleplot_dot"></span></button>
       </div>
       <div class="boot-toggle" title="Scope of the stats below">
         <button id="boot_since" class="boot-seg active">Since last boot</button>
@@ -983,6 +1015,9 @@
         </div>
         <div id="panel_diagnosis" class="info-pane" hidden>
           <div id="diagnosisContent"></div>
+        </div>
+        <div id="panel_teleplot" class="info-pane" hidden>
+          <div id="teleplotContent"></div>
         </div>
       </div>
       <!-- Right edge: click to hide / show the panel -->

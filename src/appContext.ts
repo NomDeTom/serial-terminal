@@ -39,15 +39,18 @@ export interface Dom {
   dataPlotEl: HTMLElement;
   diagnosisEl: HTMLElement;
   interestEl: HTMLElement;
+  teleplotEl: HTMLElement;
   infoPanelEl: HTMLElement;
   panelSummaryEl: HTMLElement;
   panelDataEl: HTMLElement;
   panelDiagnosisEl: HTMLElement;
   panelInterestEl: HTMLElement;
+  panelTeleplotEl: HTMLElement;
   workspaceEl: HTMLElement;
   dataDotEl: HTMLElement;
   diagnosisDotEl: HTMLElement;
   interestDotEl: HTMLElement;
+  teleplotDotEl: HTMLElement;
   // Filters / search chrome
   moduleBtnsEl: HTMLElement;
   logSearchInput: HTMLInputElement;
@@ -78,6 +81,7 @@ export interface Dom {
   autoscrollBtn: HTMLButtonElement;
   staticScrollBtn: HTMLButtonElement;
   piiButton: HTMLButtonElement;
+  teleplotHideDataBtn: HTMLButtonElement;
 }
 
 export const dom = {} as Dom;
@@ -87,15 +91,18 @@ export function initDom(): void {
   dom.dataPlotEl = document.getElementById('dataPlotContent')!;
   dom.diagnosisEl = document.getElementById('diagnosisContent')!;
   dom.interestEl = document.getElementById('interestContent')!;
+  dom.teleplotEl = document.getElementById('teleplotContent')!;
   dom.infoPanelEl = document.getElementById('info_panel')!;
   dom.panelSummaryEl = document.getElementById('panel_summary')!;
   dom.panelDataEl = document.getElementById('panel_data')!;
   dom.panelDiagnosisEl = document.getElementById('panel_diagnosis')!;
   dom.panelInterestEl = document.getElementById('panel_interest')!;
+  dom.panelTeleplotEl = document.getElementById('panel_teleplot')!;
   dom.workspaceEl = document.querySelector('.workspace')!;
   dom.dataDotEl = document.getElementById('data_dot')!;
   dom.diagnosisDotEl = document.getElementById('diagnosis_dot')!;
   dom.interestDotEl = document.getElementById('interest_dot')!;
+  dom.teleplotDotEl = document.getElementById('teleplot_dot')!;
   dom.moduleBtnsEl = document.getElementById('module_buttons')!;
   dom.logSearchInput = document.getElementById('log_search') as HTMLInputElement;
   dom.searchFilterBtn = document.getElementById('search_filter') as HTMLButtonElement;
@@ -122,9 +129,10 @@ export function initDom(): void {
   dom.autoscrollBtn = document.getElementById('autoscroll') as HTMLButtonElement;
   dom.staticScrollBtn = document.getElementById('static_scroll') as HTMLButtonElement;
   dom.piiButton = document.getElementById('pii_toggle') as HTMLButtonElement;
+  dom.teleplotHideDataBtn = document.getElementById('teleplot_hide_data') as HTMLButtonElement;
 }
 
-export type InfoTab = 'summary' | 'data' | 'diagnosis' | 'interest';
+export type InfoTab = 'summary' | 'data' | 'diagnosis' | 'interest' | 'teleplot';
 
 // Toggle which info-panel pane is visible and which tab button is active.
 export function switchInfoTab(panel: InfoTab): void {
@@ -132,6 +140,7 @@ export function switchInfoTab(panel: InfoTab): void {
   dom.panelDataEl.hidden = panel !== 'data';
   dom.panelDiagnosisEl.hidden = panel !== 'diagnosis';
   dom.panelInterestEl.hidden = panel !== 'interest';
+  dom.panelTeleplotEl.hidden = panel !== 'teleplot';
   document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset['panel'] === panel);
   });

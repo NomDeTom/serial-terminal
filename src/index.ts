@@ -16,7 +16,8 @@ import {
   SEARCH_DECO, initAutoscroll,
 } from './logView';
 import {setBootScope, refreshDataPlot, initDataControls} from './statsView';
-import {switchView, clearLog} from './viewController';
+import {refreshTeleplot, initTeleplotControls} from './teleplotView';
+import {switchView, clearLog, toggleTeleplotFocus} from './viewController';
 import {initSerial} from './serialSource';
 import {initFile} from './fileSource';
 
@@ -38,13 +39,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   initDataControls();
+  initTeleplotControls();
   initAutoscroll();
   initFile();
 
   // View tabs (Live Serial / File)
-  document.querySelectorAll<HTMLButtonElement>('.view-tab').forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>('.view-tab[data-view]').forEach((btn) => {
     btn.addEventListener('click', () => switchView(btn.dataset['view'] as 'serial' | 'file'));
   });
+
+  // Teleplot focus toggle: a sidebar lens, not a data-source switch — sits next
+  // to the view tabs but doesn't participate in switchView.
+  document.getElementById('teleplot_toggle')!.addEventListener('click', toggleTeleplotFocus);
 
   // Advanced panel toggle
   const advancedPanel = document.getElementById('advanced')!;
@@ -58,10 +64,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Info panel tabs
   document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const panel = btn.dataset['panel'] as 'summary' | 'data' | 'diagnosis' | 'interest';
+      const panel = btn.dataset['panel'] as 'summary' | 'data' | 'diagnosis' | 'interest' | 'teleplot';
       switchInfoTab(panel);
-      // Telemetry parse is deferred; trigger it now that the panel is visible.
+      // Telemetry/teleplot parse is deferred; trigger it now that the panel is visible.
       if (panel === 'data') refreshDataPlot(active);
+      if (panel === 'teleplot') refreshTeleplot(active);
     });
   });
 
@@ -74,6 +81,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     edgeArrow.textContent = on ? '⟩' : '⟨';
     panelEdgeLeft.title = on ? 'Collapse analysis view' : 'Expand analysis view';
     refreshDataPlot(active);   // regenerate charts at the new (large/small) size
+    refreshTeleplot(active);
     active.fit.fit();
   });
 
@@ -179,6 +187,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     dom.highlightLinesBtn.classList.toggle('active', active.highlightLines);
     rerender(active);
     if (active.searchTerm) runSearch();
+  });
+
+  // Teleplot "Hide Data" toggle: filters ">name:value" lines out of the
+  // rendered log (they stay in lineHistory, so Save and the Teleplot tab
+  // are unaffected — see linePassesFilter in logView.ts).
+  dom.teleplotHideDataBtn.addEventListener('click', () => {
+    active.hideTeleplotLines = !active.hideTeleplotLines;
+    dom.teleplotHideDataBtn.classList.toggle('btn-active', active.hideTeleplotLines);
+    rerender(active);
   });
 
   // PII toggle

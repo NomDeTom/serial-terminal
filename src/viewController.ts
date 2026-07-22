@@ -14,7 +14,14 @@ import {
   disposeDecorations, discardPendingWrites, SEARCH_DECO,
 } from './logView';
 import {refreshSummary, syncBootToggle} from './statsView';
+import {refreshTeleplot} from './teleplotView';
 import {refreshPanels} from './panels';
+
+// Teleplot focus mode: restricts the sidebar to the Teleplot pane only (hides
+// the Meshtastic-specific tabs and the boot-scope toggle). Independent of
+// which underlying session (Live Serial / File) is active — it is a sidebar
+// lens, not a data source.
+let teleplotFocus = false;
 
 // Rebuild the shared chrome (panels, filter buttons, module list) from `active`.
 export function syncChrome(): void {
@@ -34,14 +41,17 @@ export function syncChrome(): void {
   }
   syncBootToggle();
   updatePiiButton();
+  dom.teleplotHideDataBtn?.classList.toggle('btn-active', active.hideTeleplotLines);
 
   dom.summaryEl.innerHTML = '';
   dom.dataPlotEl.innerHTML = '';
   dom.diagnosisEl.innerHTML = '';
   dom.interestEl.innerHTML = '';
+  dom.teleplotEl.innerHTML = '';
   dom.dataDotEl.classList.remove('visible');
   dom.diagnosisDotEl.classList.remove('visible');
   dom.interestDotEl.classList.remove('visible');
+  dom.teleplotDotEl.classList.remove('visible');
   refreshPanels(active);
   refreshInterest(active);
 }
@@ -61,7 +71,9 @@ export function switchView(kind: 'serial' | 'file'): void {
     if (advBtn) advBtn.textContent = 'Advanced ▾';
   }
 
-  document.querySelectorAll<HTMLButtonElement>('.view-tab').forEach((b) => {
+  // Scoped to [data-view] so the Teleplot toggle (a sidebar lens, not a
+  // data-source tab) keeps its own active state, set by toggleTeleplotFocus.
+  document.querySelectorAll<HTMLButtonElement>('.view-tab[data-view]').forEach((b) => {
     b.classList.toggle('active', b.dataset['view'] === kind);
   });
 
@@ -70,6 +82,16 @@ export function switchView(kind: 'serial' | 'file'): void {
 
   syncChrome();
   active.fit.fit();
+}
+
+export function toggleTeleplotFocus(): void {
+  teleplotFocus = !teleplotFocus;
+  // Scoped to <body> (not #info_panel) because it also governs the LEVEL/MODULE
+  // filter chips in the filter-bar, which sits outside the info panel.
+  document.body.classList.toggle('teleplot-focus', teleplotFocus);
+  document.getElementById('teleplot_toggle')!.classList.toggle('active', teleplotFocus);
+  switchInfoTab(teleplotFocus ? 'teleplot' : 'summary');
+  if (teleplotFocus) refreshTeleplot(active);
 }
 
 export function clearLog(): void {
@@ -93,9 +115,12 @@ export function clearLog(): void {
   dom.dataPlotEl.innerHTML = '';
   dom.diagnosisEl.innerHTML = '';
   dom.interestEl.innerHTML = '';
+  dom.teleplotEl.innerHTML = '';
   dom.dataDotEl.classList.remove('visible');
   dom.diagnosisDotEl.classList.remove('visible');
   dom.interestDotEl.classList.remove('visible');
-  switchInfoTab('summary');
+  dom.teleplotDotEl.classList.remove('visible');
+  switchInfoTab(teleplotFocus ? 'teleplot' : 'summary');
   refreshSummary(s);   // restore the resting caption (panel stays visible)
+  refreshTeleplot(s);  // restore the resting caption (panel stays visible)
 }
