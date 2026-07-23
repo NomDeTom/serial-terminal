@@ -52,23 +52,36 @@ async function loadFileInto(file: File): Promise<void> {
   active.term.scrollToBottom();
 }
 
+// A drag carrying an OS file lists "Files" in dataTransfer.types; an internal
+// drag (e.g. reordering a Teleplot tile via its own draggable="true") doesn't.
+// These listeners are on `document`, so without this check they'd also fire
+// — and show the "drop file here" overlay — for any in-page drag.
+function isFileDrag(e: DragEvent): boolean {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+}
+
 function initDragDrop(): void {
   const overlay = document.getElementById('drop_overlay')!;
   let dragDepth = 0;
 
   document.addEventListener('dragenter', (e) => {
+    if (!isFileDrag(e)) return;
     e.preventDefault();
     dragDepth++;
     overlay.classList.add('active');
   });
-  document.addEventListener('dragleave', () => {
+  document.addEventListener('dragleave', (e) => {
+    if (!isFileDrag(e)) return;
     if (--dragDepth <= 0) {
       dragDepth = 0;
       overlay.classList.remove('active');
     }
   });
-  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('dragover', (e) => {
+    if (isFileDrag(e)) e.preventDefault();
+  });
   document.addEventListener('drop', (e) => {
+    if (!isFileDrag(e)) return;
     e.preventDefault();
     dragDepth = 0;
     overlay.classList.remove('active');

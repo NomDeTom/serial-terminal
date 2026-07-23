@@ -52,6 +52,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // to the view tabs but doesn't participate in switchView.
   document.getElementById('teleplot_toggle')!.addEventListener('click', toggleTeleplotFocus);
 
+  // Credits overlay
+  const creditsOverlay = document.getElementById('credits_overlay')!;
+  const closeCredits = () => creditsOverlay.classList.remove('active');
+  document.getElementById('credits_btn')!.addEventListener('click', () => {
+    creditsOverlay.classList.add('active');
+  });
+  document.getElementById('credits_close')!.addEventListener('click', closeCredits);
+  creditsOverlay.addEventListener('click', (e) => {
+    if (e.target === creditsOverlay) closeCredits(); // click on the backdrop, not the card
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeCredits();
+  });
+
   // Advanced panel toggle
   const advancedPanel = document.getElementById('advanced')!;
   document.getElementById('advanced_toggle')!.addEventListener('click', (e) => {

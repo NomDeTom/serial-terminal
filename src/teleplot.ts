@@ -206,10 +206,17 @@ function fmtT(v: number, hasTimestamps: boolean): string {
   return `${Math.round(v)}s`;
 }
 
+export type TeleplotSortMode = 'order' | 'alpha' | 'type';
+
 export interface TeleplotOptions {
   suppressZero: boolean;
   large: boolean;
-  enlarged: Set<string>; // series names the user clicked to pin at 2x tile size
+  enlarged: Set<string>;      // series names the user clicked to pin at 2x tile size
+  sortMode: TeleplotSortMode;
+  manualOrder: string[];      // series names in drag order; used when sortMode === 'order'.
+                               // Names not listed here fall back to the end, ordered by type
+                               // then alphabetically — so newly-seen series don't need to be
+                               // proactively appended, only ones the user has actually dragged.
 }
 
 function isAllZero(pts: TeleplotPoint[]): boolean {
@@ -263,7 +270,7 @@ function numericChart(series: TeleplotNumericSeries, opts: TeleplotOptions): str
     );
     out.push(
         `<text x="${(pL - 3).toFixed(1)}" y="${(y + 3).toFixed(1)}" ` +
-      `text-anchor="end" font-size="7" fill="#6b7280">${fmtV(v)}</text>`,
+      `text-anchor="end" font-size="9" fill="#6b7280">${fmtV(v)}</text>`,
     );
   }
 
@@ -279,7 +286,7 @@ function numericChart(series: TeleplotNumericSeries, opts: TeleplotOptions): str
     const x = xMin + (t / 4) * xR;
     out.push(
         `<text x="${X(x).toFixed(1)}" y="${ly}" ` +
-      `text-anchor="middle" font-size="7" fill="#6b7280">${fmtT(x, series.hasTimestamps)}</text>`,
+      `text-anchor="middle" font-size="9" fill="#6b7280">${fmtT(x, series.hasTimestamps)}</text>`,
     );
   }
 
@@ -288,8 +295,9 @@ function numericChart(series: TeleplotNumericSeries, opts: TeleplotOptions): str
     out.join('') + '</svg>';
   const label = series.name + (series.unit ? ` (${series.unit})` : '');
   const badge = big ? '<span class="hc-range">2×</span>' : '';
-  return `<div class="hc-section tp-plot${big ? ' tp-enlarged' : ''}" data-key="${escapeAttr(series.name)}" ` +
-    `title="${big ? 'Click to shrink' : 'Click to enlarge'}">` +
+  return `<div class="hc-section tp-tile tp-plot${big ? ' tp-enlarged' : ''}" ` +
+    `data-key="${escapeAttr(series.name)}" draggable="true" ` +
+    `title="${big ? 'Click to shrink · drag to reorder' : 'Click to enlarge · drag to reorder'}">` +
     `<div class="hc-head"><span class="hc-label">${escapeHtml(label)}</span>${badge}</div>${svg}</div>`;
 }
 
@@ -343,8 +351,9 @@ function xyChart(series: TeleplotXYSeries, opts: TeleplotOptions): string {
     `<rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" fill="none" stroke="#374151"/>` +
     out.join('') + '</svg>';
   const coord = `${big ? '2× · ' : ''}${fmtV(last.x)}, ${fmtV(last.y)}`;
-  return `<div class="hc-section tp-plot${big ? ' tp-enlarged' : ''}" data-key="${escapeAttr(series.name)}" ` +
-    `title="${big ? 'Click to shrink' : 'Click to enlarge'}">` +
+  return `<div class="hc-section tp-tile tp-plot${big ? ' tp-enlarged' : ''}" ` +
+    `data-key="${escapeAttr(series.name)}" draggable="true" ` +
+    `title="${big ? 'Click to shrink · drag to reorder' : 'Click to enlarge · drag to reorder'}">` +
     `<div class="hc-head"><span class="hc-label">${escapeHtml(series.name)} (xy)</span>` +
     `<span class="hc-range">${coord}</span></div>${svg}</div>`;
 }
@@ -356,9 +365,45 @@ function textTile(series: TeleplotTextSeries): string {
     `<div class="ns-row"><span class="ns-k">${fmtT(h.x, true)}</span>` +
     `<span class="ns-v">${escapeHtml(h.value)}</span></div>`,
   ).join('');
-  return `<div class="hc-section" data-key="${escapeAttr(series.name)}">` +
+  return `<div class="hc-section tp-tile" data-key="${escapeAttr(series.name)}" draggable="true" ` +
+    'title="Drag to reorder">' +
     `<div class="hc-label">${escapeHtml(series.name)}</div>` +
     `<div class="ns-tile">${rows}</div></div>`;
+}
+
+interface Tile {
+  key: string;
+  kind: 'numeric' | 'xy' | 'text';
+  html: string;
+}
+
+const KIND_ORDER: Record<Tile['kind'], number> = {numeric: 0, xy: 1, text: 2};
+
+// Tie-break used both for the "Type" sort mode and for positioning tiles the
+// user hasn't dragged yet in "Order" mode.
+function byTypeThenName(a: Tile, b: Tile): number {
+  return (KIND_ORDER[a.kind] - KIND_ORDER[b.kind]) || a.key.localeCompare(b.key);
+}
+
+function sortTiles(tiles: Tile[], opts: TeleplotOptions): Tile[] {
+  if (opts.sortMode === 'alpha') {
+    return [...tiles].sort((a, b) => a.key.localeCompare(b.key));
+  }
+  if (opts.sortMode === 'type') {
+    return [...tiles].sort(byTypeThenName);
+  }
+  // 'order': drag position wins; anything not yet dragged falls to the end,
+  // in type-then-name order, so newly-seen series don't need to be
+  // proactively appended to manualOrder.
+  const pos = new Map(opts.manualOrder.map((k, i) => [k, i]));
+  return [...tiles].sort((a, b) => {
+    const ai = pos.get(a.key);
+    const bi = pos.get(b.key);
+    if (ai !== undefined && bi !== undefined) return ai - bi;
+    if (ai !== undefined) return -1;
+    if (bi !== undefined) return 1;
+    return byTypeThenName(a, b);
+  });
 }
 
 export function renderTeleplotPanel(data: TeleplotData, opts: TeleplotOptions): string {
@@ -374,19 +419,20 @@ export function renderTeleplotPanel(data: TeleplotData, opts: TeleplotOptions): 
   const xy = data.xy.filter((s) => !s.noPlot);
   const text = data.text.filter((s) => !s.noPlot);
 
-  const parts: string[] = [];
-  for (const s of numeric.sort((a, b) => a.name.localeCompare(b.name))) {
-    const chart = numericChart(s, opts);
-    if (chart) parts.push(chart);
+  const tiles: Tile[] = [];
+  for (const s of numeric) {
+    const html = numericChart(s, opts);
+    if (html) tiles.push({key: s.name, kind: 'numeric', html});
   }
-  for (const s of xy.sort((a, b) => a.name.localeCompare(b.name))) {
-    parts.push(xyChart(s, opts));
+  for (const s of xy) {
+    const html = xyChart(s, opts);
+    if (html) tiles.push({key: s.name, kind: 'xy', html});
   }
-  for (const s of text.sort((a, b) => a.name.localeCompare(b.name))) {
-    const tile = textTile(s);
-    if (tile) parts.push(tile);
+  for (const s of text) {
+    const html = textTile(s);
+    if (html) tiles.push({key: s.name, kind: 'text', html});
   }
 
-  if (parts.length === 0) return '';
-  return `<div class="dp-charts">${parts.join('')}</div>`;
+  if (tiles.length === 0) return '';
+  return `<div class="dp-charts">${sortTiles(tiles, opts).map((t) => t.html).join('')}</div>`;
 }

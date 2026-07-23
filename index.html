@@ -309,6 +309,70 @@
       letter-spacing: 0.02em;
     }
 
+    /* Credits overlay */
+    .credits-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 24, 39, 0.88);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s;
+    }
+    .credits-overlay.active { opacity: 1; pointer-events: auto; }
+    .credits-card {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px 26px;
+      width: calc(100% - 48px);
+      max-width: 360px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    }
+    .credits-card h2 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .credits-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 6px;
+      line-height: 1;
+    }
+    .credits-close:hover { color: var(--text); }
+    .credits-list {
+      list-style: none;
+      margin: 0 0 14px;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+    .credits-list li { font-size: 11px; color: var(--muted); line-height: 1.5; }
+    .credits-list a { color: var(--green); text-decoration: none; font-weight: 600; }
+    .credits-list a:hover { text-decoration: underline; }
+    .credits-license {
+      margin: 0;
+      font-size: 10px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+    .credits-license a { color: var(--muted); }
+    .credits-license a:hover { color: var(--text); }
+
     /* ── Info sidebar ── */
     #info_panel {
       width: 340px;
@@ -704,12 +768,33 @@
     #teleplotContent { display: block; }
     #teleplotContent a { color: var(--green); }
     .tp-count { font-size: 10px; color: var(--muted); margin-left: auto; }
-    /* Click a chart tile to pin it at 2x size (teleplotView.ts toggles a
-       per-series Set and re-renders at double width/height). */
-    .tp-plot { cursor: pointer; outline: 1px solid transparent; outline-offset: 2px; border-radius: 4px; transition: outline-color 0.12s, background-color 0.12s; }
-    .tp-plot:hover { outline-color: var(--border); }
+    /* Any tile can be dragged to reorder (teleplotView.ts, "Order" sort mode).
+       Chart tiles (not text tiles) can also be clicked to pin them at 2x size. */
+    .tp-tile { cursor: grab; outline: 1px solid transparent; outline-offset: 2px; border-radius: 4px; transition: outline-color 0.12s, background-color 0.12s, opacity 0.12s; }
+    .tp-tile:hover { outline-color: var(--border); }
+    .tp-tile.tp-dragging { opacity: 0.35; cursor: grabbing; }
+    .tp-tile.tp-drop-target { outline: 2px dashed var(--green); outline-offset: 2px; }
     .tp-plot.tp-enlarged { outline: 1px solid var(--green); background: rgba(103,234,148,0.05); }
     .workspace.analysis #teleplotContent .dp-charts .tp-plot.tp-enlarged { grid-column: span 2; grid-row: span 2; }
+
+    /* Arrange-by segmented control (Type / A–Z / Order) in the Teleplot controls bar */
+    .tp-sort { display: inline-flex; }
+    .tp-sort-btn {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-right: none;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      padding: 3px 8px;
+      transition: all 0.12s;
+    }
+    .tp-sort-btn:last-child { border-right: 1px solid var(--border); border-radius: 0 4px 4px 0; }
+    .tp-sort-btn:first-child { border-radius: 4px 0 0 4px; }
+    .tp-sort-btn:hover { color: var(--text); }
+    .tp-sort-btn.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
 
     /* Teleplot focus mode: sidebar shows only the Teleplot pane, meshtastic
        tabs and the (meshtastic-only) boot-scope toggle are hidden; the
@@ -854,6 +939,9 @@
     <button class="view-tab view-tab-big active" data-view="serial">Live Serial</button>
     <button class="view-tab view-tab-big" data-view="file">📄 File</button>
     <button class="view-tab view-tab-big" id="teleplot_toggle" title="Focus the sidebar on Teleplot charts only">📈 Teleplot</button>
+    <div class="toolbar-right">
+      <button id="credits_btn" class="btn" title="Credits">ℹ️ Credits</button>
+    </div>
   </div>
 
   <!-- ── Row 2: mode controls (swaps with the view) ── -->
@@ -1031,9 +1119,26 @@
   <footer>
     Based on the <a href="https://github.com/meshtastic/firmware" target="_blank" rel="noopener">Meshtastic</a>
     source code &amp; <a href="https://github.com/GoogleChromeLabs/serial-terminal" target="_blank"
-    rel="noopener">GoogleChromeLabs/serial-terminal</a>. Shared under the
+    rel="noopener">GoogleChromeLabs/serial-terminal</a>. Teleplot tab follows the
+    <a href="https://github.com/nesnes/teleplot" target="_blank" rel="noopener">nesnes/teleplot</a> format.
+    Shared under the
     <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL-3.0 licence</a>.
   </footer>
+
+  <!-- ── Credits overlay ── -->
+  <div id="credits_overlay" class="credits-overlay">
+    <div class="credits-card">
+      <button id="credits_close" class="credits-close" title="Close" aria-label="Close">✕</button>
+      <h2>Credits</h2>
+      <ul class="credits-list">
+        <li><a href="https://github.com/meshtastic/firmware" target="_blank" rel="noopener">meshtastic/firmware</a> — device log format &amp; protocol knowledge</li>
+        <li><a href="https://github.com/GoogleChromeLabs/serial-terminal" target="_blank" rel="noopener">GoogleChromeLabs/serial-terminal</a> — base terminal app this is built on</li>
+        <li><a href="https://github.com/nesnes/teleplot" target="_blank" rel="noopener">nesnes/teleplot</a> — Teleplot protocol &amp; format the 📈 Teleplot tab implements</li>
+      </ul>
+      <p class="credits-license">Shared under the
+        <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL-3.0 licence</a>.</p>
+    </div>
+  </div>
 
   <script type="module" src="/src/index.ts"></script>
 </body>
