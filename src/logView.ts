@@ -188,7 +188,7 @@ function countSearchMatches(s: Session): number {
   if (!s.searchTerm) return 0;
   const lc = s.searchTerm.toLowerCase();
   let n = 0;
-  for (const line of s.lineHistory) {
+  for (const line of s.fullHistory) {
     if (s.hideTeleplotLines && isTeleplotDataLine(line)) continue;
     const {level, module} = parseLine(line);
     if (level && !s.levelFilter.has(level)) continue;
@@ -456,8 +456,11 @@ export function rerender(s: Session): void {
   let ip = 0;
   const hlTerm = s.highlightLines && !!s.searchTerm;
   const lcTerm = hlTerm ? s.searchTerm.toLowerCase() : '';
-  for (const line of s.lineHistory) {
-    const ann = annotateLine(line);
+  // overflow = lines in fullHistory that have been evicted from lineHistory (no interest entries)
+  const overflow = s.fullHistory.length - s.lineHistory.length;
+  for (let i = 0; i < s.fullHistory.length; i++) {
+    const line = s.fullHistory[i];
+    const ann = i >= overflow ? annotateLine(line) : false;
     const entry = ann ? s.interest[ip++] : undefined;
     if (linePassesFilter(s, line)) {
       const hl = hlTerm && line.toLowerCase().includes(lcTerm);
