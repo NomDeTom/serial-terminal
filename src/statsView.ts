@@ -17,6 +17,7 @@ import type {Session} from './logView';
 let dataSuppressZero = false;
 const dataAutoRange = new Set<string>();    // series keys the user pinned to auto
 const dataFixedRange = new Set<string>();   // series keys the user pinned to fixed
+const dataEnlarged = new Set<string>();     // chart keys pinned to 2x size by clicking
 
 // Caption shown in the summary pane before any data has been parsed.
 function restingCaption(): string {
@@ -42,10 +43,12 @@ function renderDataControls(): string {
 export function refreshDataPlot(s: Session): void {
   if (!dom.dataPlotEl || s !== active) return;
   const sum = s.showAllBoots ? s.cumulative : s.summary;
-  const statusHtml = renderNodeStatusTile(sum);
-  const nodeCountHtml = renderNodeCountChart(sum);
-  const hopHtml = renderHopChart(sum);
-  const chanHtml = renderChannelHashChart(sum);
+  const plot = (key: string, html: string) =>
+    html ? `<div class="dp-plot${dataEnlarged.has(key) ? ' dp-enlarged' : ''}" data-key="${key}">${html}</div>` : '';
+  const statusHtml = plot('nodeStatus', renderNodeStatusTile(sum));
+  const nodeCountHtml = plot('nodeCount', renderNodeCountChart(sum));
+  const hopHtml = plot('hop', renderHopChart(sum));
+  const chanHtml = plot('channelHash', renderChannelHashChart(sum));
   // Telemetry parse is O(n) over lineHistory — only run when the panel is open.
   let telHtml = '';
   if (dom.panelDataEl && !dom.panelDataEl.hidden) {
@@ -57,7 +60,7 @@ export function refreshDataPlot(s: Session): void {
     };
     telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))), opts);
   }
-  const nodesHtml = renderSeenNodesTable(sum);
+  const nodesHtml = plot('seenNodes', renderSeenNodesTable(sum));
   const chartsHtml = statusHtml + nodeCountHtml + hopHtml + chanHtml + nodesHtml + telHtml;
   if (!chartsHtml) {
     dom.dataPlotEl.innerHTML = '';
@@ -88,6 +91,14 @@ export function initDataControls(): void {
       }
       refreshDataPlot(active);
     }
+  });
+  dom.dataPlotEl.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('button,input,label,a')) return;
+    const tile = (e.target as HTMLElement).closest<HTMLElement>('.dp-plot');
+    if (!tile?.dataset['key']) return;
+    const key = tile.dataset['key']!;
+    if (dataEnlarged.has(key)) dataEnlarged.delete(key); else dataEnlarged.add(key);
+    refreshDataPlot(active);
   });
 }
 
