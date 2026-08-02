@@ -1577,9 +1577,10 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   (line, s) => {
     if (!/Lora RX \(/.test(line)) return;
     const idM = line.match(/Lora RX \(id=(0x[\da-fA-F]+)/);
-    const chM = line.match(/\bCh=(0x[\da-fA-F]+)/);
+    const chM = line.match(/\bCh=(0x[\da-fA-F]+|\d+)/);
     if (!idM || !chM) return;
-    const hash = chM[1].toLowerCase();
+    const chRaw = chM[1];
+    const hash = chRaw.startsWith('0x') ? chRaw.toLowerCase() : `0x${parseInt(chRaw, 10).toString(16)}`;
     const id = idM[1].toLowerCase();
     s.rxChannelHashCounts[hash] = (s.rxChannelHashCounts[hash] ?? 0) + 1;
     const isDup = s._seenPacketIds.has(id);
@@ -1624,9 +1625,10 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // sent packet on both hardware (RadioLibInterface.cpp:524) and native
   // (SimRadio.cpp:98). Symmetric counterpart to #202's RX tally.
   (line, s) => {
-    const m = line.match(/Completed sending \(.*\bCh=(0x[\da-fA-F]+)/);
+    const m = line.match(/Completed sending \(.*\bCh=(0x[\da-fA-F]+|\d+)/);
     if (!m) return;
-    const hash = m[1].toLowerCase();
+    const chRaw = m[1];
+    const hash = chRaw.startsWith('0x') ? chRaw.toLowerCase() : `0x${parseInt(chRaw, 10).toString(16)}`;
     s.txChannelHashCounts[hash] = (s.txChannelHashCounts[hash] ?? 0) + 1;
   },
 
