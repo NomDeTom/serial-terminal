@@ -1175,7 +1175,7 @@ export function renderChannelHashChart(s: DeviceSummary): string {
     g.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="8" fill="#6b7280">` +
       `${hashes[i]}</text>`);
     const hint = publicChannelHint(Number(hashes[i]));
-    const title = `Ch ${hashes[i]} — heard ${rx[i]}, decoded ${dec[i]}, ` +
+    const title = `Ch 0x${Number(hashes[i]).toString(16)} — heard ${rx[i]}, decoded ${dec[i]}, ` +
       `dup ${dup[i]}, sent ${tx[i]}` +
       (hint ? `\nPossible public channels:\n${hint}` : '\n(no known public preset)');
     parts.push(`<g><title>${xmlEscape(title)}</title>${g.join('')}</g>`);

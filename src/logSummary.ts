@@ -1580,7 +1580,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const chM = line.match(/\bCh=(0x[\da-fA-F]+|\d+)/);
     if (!idM || !chM) return;
     const chRaw = chM[1];
-    const hash = chRaw.startsWith('0x') ? chRaw.toLowerCase() : `0x${parseInt(chRaw, 10).toString(16)}`;
+    const hash = String(chRaw.startsWith('0x') ? parseInt(chRaw, 16) : parseInt(chRaw, 10));
     const id = idM[1].toLowerCase();
     s.rxChannelHashCounts[hash] = (s.rxChannelHashCounts[hash] ?? 0) + 1;
     const isDup = s._seenPacketIds.has(id);
@@ -1628,7 +1628,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     const m = line.match(/Completed sending \(.*\bCh=(0x[\da-fA-F]+|\d+)/);
     if (!m) return;
     const chRaw = m[1];
-    const hash = chRaw.startsWith('0x') ? chRaw.toLowerCase() : `0x${parseInt(chRaw, 10).toString(16)}`;
+    const hash = String(chRaw.startsWith('0x') ? parseInt(chRaw, 16) : parseInt(chRaw, 10));
     s.txChannelHashCounts[hash] = (s.txChannelHashCounts[hash] ?? 0) + 1;
   },
 
