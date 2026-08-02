@@ -80,7 +80,7 @@ export function parseLine(line: string): ParsedLine {
   m = line.match(OLD_FMT);
   if (m) return {level: m[2].toUpperCase(), module: m[3]};
   m = line.match(ESP32_FMT);
-  if (m) return {level: ESP32_LEVEL[m[1]] ?? 'I', module: m[2]};
+  if (m) return {level: ESP32_LEVEL[m[1]] ?? 'I', module: m[2].replace(/:\d+$/, '').replace(/\.\w+$/, '')};
   m = line.match(ESPIDF_FMT);
   if (m) return {level: ESP32_LEVEL[m[1]] ?? 'I', module: m[3]};
   return {level: '', module: ''};
