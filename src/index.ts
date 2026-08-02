@@ -10,7 +10,7 @@
  *   - viewController            — view switching + chrome sync + clear
  */
 import {initDeviceInfo} from './deviceInfo';
-import {initDom, initSessions, switchInfoTab, active, dom} from './appContext';
+import {initDom, initSessions, switchInfoTab, isMobileLayout, active, dom} from './appContext';
 import {
   createSession, rerender, updateSearchCount, updatePiiButton, saveLog,
   SEARCH_DECO, initAutoscroll,
@@ -75,16 +75,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     active.fit.fit();
   });
 
-  // Info panel tabs
-  document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
+  // Info panel tabs — .mobile-tab is the mobile-only full-screen tab bar (index.html),
+  // which additionally includes the "LOG" pane that .info-tab doesn't have.
+  document.querySelectorAll<HTMLButtonElement>('.info-tab, .mobile-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const panel = btn.dataset['panel'] as 'summary' | 'data' | 'diagnosis' | 'interest' | 'teleplot';
+      const panel = btn.dataset['panel'] as 'log' | 'summary' | 'data' | 'diagnosis' | 'interest' | 'teleplot';
       switchInfoTab(panel);
       // Telemetry/teleplot parse is deferred; trigger it now that the panel is visible.
       if (panel === 'data') refreshDataPlot(active);
       if (panel === 'teleplot') refreshTeleplot(active);
     });
   });
+
+  // On a phone-width/touch device, land on the LOG tab (the terminal) first —
+  // desktop's default (SUMMARY, set in the HTML's initial .info-tab.active
+  // class) doesn't apply since there's no always-visible terminal on mobile.
+  if (isMobileLayout()) switchInfoTab('log');
 
   // Left edge: expand/collapse the analysis view
   const panelEdgeLeft = document.getElementById('panel_edge_left')!;
@@ -130,6 +136,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     (e.currentTarget as HTMLButtonElement).classList.toggle('active', allHidden);
     rerender(s);
+  });
+
+  // Module chip overflow popover (only reachable once collapsed — see
+  // syncModuleOverflow in logView.ts / .module-overflow.collapsed in index.html)
+  dom.moduleOverflowToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dom.moduleOverflowEl.classList.toggle('open');
+  });
+  document.addEventListener('click', (e) => {
+    if (dom.moduleOverflowEl.classList.contains('open') &&
+        !dom.moduleOverflowEl.contains(e.target as Node)) {
+      dom.moduleOverflowEl.classList.remove('open');
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') dom.moduleOverflowEl.classList.remove('open');
   });
 
   // Level filter buttons

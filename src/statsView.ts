@@ -11,6 +11,7 @@ import {
 } from './summaryRenderer';
 import {parseLog as parseSensorLog, toSeries, renderTelemetryCharts} from './sensorTelemetry';
 import {refreshDiagnosis} from './diagnosisView';
+import {layoutMasonry} from './masonryLayout';
 import type {Session} from './logView';
 
 // Data-panel chart controls (shared across sessions, re-applied on each render)
@@ -18,6 +19,7 @@ let dataSuppressZero = false;
 const dataAutoRange = new Set<string>();    // series keys the user pinned to auto
 const dataFixedRange = new Set<string>();   // series keys the user pinned to fixed
 const dataEnlarged = new Set<string>();     // chart keys pinned to 2x size by clicking
+const dataLogScale = new Set<string>();     // chart keys pinned to a log Y-scale
 
 // Caption shown in the summary pane before any data has been parsed.
 function restingCaption(): string {
@@ -40,15 +42,28 @@ function renderDataControls(): string {
     '</div>';
 }
 
+// Chart tiles default to 1 masonry column; enlarging one (click-to-toggle,
+// see the click handler below) requests a wider 2-column slot rather than
+// jumping straight to full width.
+function plot(key: string, html: string): string {
+  if (!html) return '';
+  const enlarged = dataEnlarged.has(key);
+  return `<div class="dp-plot${enlarged ? ' dp-enlarged' : ''}" data-key="${key}" ` +
+    `data-span="${enlarged ? 2 : 1}">${html}</div>`;
+}
+
+function relayoutDataCharts(): void {
+  const chartsEl = dom.dataPlotEl.querySelector<HTMLElement>('.dp-charts');
+  if (chartsEl) layoutMasonry(chartsEl);
+}
+
 export function refreshDataPlot(s: Session): void {
   if (!dom.dataPlotEl || s !== active) return;
   const sum = s.showAllBoots ? s.cumulative : s.summary;
-  const plot = (key: string, html: string) =>
-    html ? `<div class="dp-plot${dataEnlarged.has(key) ? ' dp-enlarged' : ''}" data-key="${key}">${html}</div>` : '';
   const statusHtml = plot('nodeStatus', renderNodeStatusTile(sum));
   const nodeCountHtml = plot('nodeCount', renderNodeCountChart(sum));
   const hopHtml = plot('hop', renderHopChart(sum));
-  const chanHtml = plot('channelHash', renderChannelHashChart(sum));
+  const chanHtml = plot('channelHash', renderChannelHashChart(sum, dataLogScale.has('channelHash')));
   // Telemetry parse is O(n) over lineHistory — only run when the panel is open.
   let telHtml = '';
   if (dom.panelDataEl && !dom.panelDataEl.hidden) {
@@ -60,7 +75,10 @@ export function refreshDataPlot(s: Session): void {
     };
     telHtml = renderTelemetryCharts(toSeries(parseSensorLog(s.lineHistory.join('\n'))), opts);
   }
-  const nodesHtml = plot('seenNodes', renderSeenNodesTable(sum));
+  // One tile per channel (not one tile holding every channel's table) so the
+  // masonry layout can pack each by its own height instead of leaving a gap
+  // shaped like the tallest channel next to every shorter one.
+  const nodesHtml = renderSeenNodesTable(sum).map(({key, html}) => plot(key, html)).join('');
   const chartsHtml = statusHtml + nodeCountHtml + hopHtml + chanHtml + nodesHtml + telHtml;
   if (!chartsHtml) {
     dom.dataPlotEl.innerHTML = '';
@@ -68,6 +86,7 @@ export function refreshDataPlot(s: Session): void {
   }
   dom.dataPlotEl.innerHTML = renderDataControls() + `<div class="dp-charts">${chartsHtml}</div>`;
   dom.dataDotEl?.classList.add('visible');
+  relayoutDataCharts();
 }
 
 // Delegated handler for the data-panel chart controls (content is rebuilt on
@@ -90,6 +109,12 @@ export function initDataControls(): void {
         dataAutoRange.delete(key);
       }
       refreshDataPlot(active);
+    } else if (t.classList.contains('dp-logscale')) {
+      const key = t.dataset['key'];
+      if (key === undefined) return;
+      if ((t as HTMLInputElement).checked) dataLogScale.add(key);
+      else dataLogScale.delete(key);
+      refreshDataPlot(active);
     }
   });
   dom.dataPlotEl.addEventListener('click', (e) => {
@@ -100,6 +125,10 @@ export function initDataControls(): void {
     if (dataEnlarged.has(key)) dataEnlarged.delete(key); else dataEnlarged.add(key);
     refreshDataPlot(active);
   });
+  // Column count depends on live container width, and the pane can go from
+  // 0 width (another info-tab active, or the sidebar collapsed) to real width
+  // without refreshDataPlot() re-running — reflow on any size/visibility change.
+  new ResizeObserver(relayoutDataCharts).observe(dom.panelDataEl);
 }
 
 // ── Boot-scope segmented toggle ("Since last boot" vs "All logs") ─────────────

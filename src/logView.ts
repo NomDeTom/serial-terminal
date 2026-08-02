@@ -224,6 +224,21 @@ export function addModuleButton(s: Session, key: string): void {
     rerender(s);
   });
   dom.moduleBtnsEl.appendChild(btn);
+  syncModuleOverflow();
+}
+
+// Busy Meshtastic logs can surface 20-40+ distinct module tags — past this many
+// inline chips the filter bar just wraps forever, so collapse them into a popover.
+const MODULE_OVERFLOW_THRESHOLD = 10;
+
+export function syncModuleOverflow(): void {
+  if (!dom.moduleOverflowEl) return;
+  const n = active.seenModules.size;
+  const collapsed = n > MODULE_OVERFLOW_THRESHOLD;
+  dom.moduleOverflowEl.classList.toggle('collapsed', collapsed);
+  if (!collapsed) dom.moduleOverflowEl.classList.remove('open');
+  dom.moduleOverflowToggleBtn.hidden = !collapsed;
+  dom.moduleOverflowToggleBtn.textContent = `Modules (${n}) ▾`;
 }
 
 // Two leading spaces reserve a left gutter that annotation decorations overlay.

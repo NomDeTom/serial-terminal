@@ -1116,7 +1116,7 @@ function xmlEscape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function renderChannelHashChart(s: DeviceSummary): string {
+export function renderChannelHashChart(s: DeviceSummary, logScale = false): string {
   const hashes = [...new Set([
     ...Object.keys(s.rxChannelHashCounts),
     ...Object.keys(s.decodedChannelHashCounts),
@@ -1135,17 +1135,20 @@ export function renderChannelHashChart(s: DeviceSummary): string {
   const dup = hashes.map((h) => s.dupChannelHashCounts[h] ?? 0);
   const tx = hashes.map((h) => s.txChannelHashCounts[h] ?? 0);
   const maxVal = Math.max(1, ...rx, ...dec.map((d, i) => d + dup[i]), ...tx);
+  const scale = logScale ? 'log' : 'linear';
   const groupW = cW / n;
   const gap = Math.max(2, groupW * 0.2);
   const barW = (groupW - gap) / 3;
-  const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal);
+  const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal, scale);
 
   for (let i = 0; i < n; i++) {
     const gx = pL + i * groupW + gap / 2;
-    const rH = (rx[i] / maxVal) * cH;
-    const dH = (dec[i] / maxVal) * cH;
-    const uH = (dup[i] / maxVal) * cH;
-    const tH = (tx[i] / maxVal) * cH;
+    const rH = valueToFrac(rx[i], maxVal, scale) * cH;
+    const dH = valueToFrac(dec[i], maxVal, scale) * cH;
+    // Dup segment stacks on top of decoded — its height is the frac of the combined
+    // value minus the decoded frac, so the stack boundary lands at dec+dup, not dec.
+    const uH = valueToFrac(dec[i] + dup[i], maxVal, scale) * cH - dH;
+    const tH = valueToFrac(tx[i], maxVal, scale) * cH;
     const g: string[] = [];
     // Transparent full-column hit area so the hover tooltip covers the whole group.
     g.push(`<rect x="${(pL + i * groupW).toFixed(1)}" y="${pT}" ` +
@@ -1188,7 +1191,11 @@ export function renderChannelHashChart(s: DeviceSummary): string {
     `<span class="hc-dot" style="background:#38bdf8;margin-left:8px"></span>decoded` +
     `<span class="hc-dot" style="background:#7dd3fc;margin-left:8px"></span>dup` +
     `<span class="hc-dot" style="background:#a78bfa;margin-left:8px"></span>sent</div>`;
-  return `<div class="hc-section"><div class="hc-label">Packets per channel hash</div>${svg}${legend}</div>`;
+  const logToggle = `<label class="hc-range"><input type="checkbox" class="dp-logscale" ` +
+    `data-key="channelHash"${logScale ? ' checked' : ''}>log scale</label>`;
+  return `<div class="hc-section">` +
+    `<div class="hc-head"><span class="hc-label">Packets per channel hash</span>${logToggle}</div>` +
+    `${svg}${legend}</div>`;
 }
 
 // A text tile showing the latest node-status snapshot (from the most recent
@@ -1259,12 +1266,34 @@ function svgGridLabel(x: number, y: number, text: string|number): string {
   return `<text x="${tx}" y="${ty}" text-anchor="end" font-size="8" fill="#6b7280">${text}</text>`;
 }
 
-function renderGridLines(pL: number, cW: number, pT: number, cH: number, maxVal: number): string[] {
+// Fraction (0..1) of the chart height a value should reach. Shared between grid-line
+// placement and bar/point placement so both agree on where a value actually lands.
+function valueToFrac(v: number, maxVal: number, scale: 'linear' | 'log' = 'linear'): number {
+  if (scale === 'log') return Math.log10(v + 1) / Math.log10(maxVal + 1);
+  return v / maxVal;
+}
+
+function renderGridLines(
+    pL: number, cW: number, pT: number, cH: number, maxVal: number,
+    scale: 'linear' | 'log' = 'linear',
+): string[] {
   const out: string[] = [];
+  if (scale === 'log') {
+    // Powers of ten read naturally on a log scale; linear even-split ticks don't.
+    const ticks = [0];
+    for (let v = 1; v < maxVal; v *= 10) ticks.push(v);
+    if (ticks[ticks.length - 1] !== maxVal) ticks.push(maxVal);
+    for (const v of ticks) {
+      const y = pT + cH - valueToFrac(v, maxVal, 'log') * cH;
+      out.push(svgGridLine(pL, pL + cW, y));
+      out.push(svgGridLabel(pL - 3, y, v));
+    }
+    return out;
+  }
   const tickCount = Math.min(maxVal, 4);
   for (let t = 0; t <= tickCount; t++) {
     const v = Math.round((t / tickCount) * maxVal);
-    const y = pT + cH - (v / maxVal) * cH;
+    const y = pT + cH - valueToFrac(v, maxVal) * cH;
     out.push(svgGridLine(pL, pL + cW, y));
     out.push(svgGridLabel(pL - 3, y, v));
   }
@@ -1357,15 +1386,19 @@ function hopLineChart(data: number[]): string {
 
 // Per-channel-hash node tables for the data tab.
 // One hc-section per channel hash, listing every node heard on that channel.
-export function renderSeenNodesTable(s: DeviceSummary): string {
+// Each channel gets its own independent tile (rather than one tile containing
+// every channel's table stacked inside it) so the DATA tab's masonry layout
+// (masonryLayout.ts) can pack them by actual height instead of leaving a big
+// tile-shaped gap next to short ones.
+export function renderSeenNodesTable(s: DeviceSummary): Array<{key: string; html: string}> {
   const entries = Object.entries(s.seenNodes);
-  if (entries.length === 0) return '';
+  if (entries.length === 0) return [];
 
   const allHashes = [...new Set(
       entries.flatMap(([, ns]) => Object.keys(ns.channels)),
   )].sort((a, b) => Number(a) - Number(b));
 
-  const sections: string[] = [];
+  const sections: Array<{key: string; html: string}> = [];
 
   for (const hash of allHashes) {
     const channelNodes = entries
@@ -1402,14 +1435,15 @@ export function renderSeenNodesTable(s: DeviceSummary): string {
         `<td>${rssi}</td><td>${snr}</td><td>${chIdx}</td></tr>`;
     }).join('');
 
-    sections.push(
-        `<div class="hc-section">` +
+    sections.push({
+      key: `seenNodes:${hash}`,
+      html: `<div class="hc-section">` +
         `<div class="hc-label">NODES ON Ch ${hash}${hintStr}${statsStr}</div>` +
         `<div class="node-table-wrap">` +
         `<table class="node-table">${hdr}${rowsHtml}</table>` +
         `</div></div>`,
-    );
+    });
   }
 
-  return sections.join('');
+  return sections;
 }

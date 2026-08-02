@@ -74,7 +74,7 @@ function snapshotFile(name: string): void {
   writeFileSync(join(dir, 'channelHash.svg'), renderChannelHashChart(summary));
   writeFileSync(join(dir, 'nodeStatus.html'), renderNodeStatusTile(summary));
   writeFileSync(join(dir, 'nodeCount.svg'), renderNodeCountChart(summary));
-  writeFileSync(join(dir, 'seenNodes.html'), renderSeenNodesTable(summary));
+  writeFileSync(join(dir, 'seenNodes.html'), renderSeenNodesTable(summary).map((t) => t.html).join(''));
   writeFileSync(join(dir, 'summary.json'), stableJson(summary));
   writeFileSync(join(dir, 'cumulative.json'), stableJson(cumulative));
 }

@@ -53,6 +53,8 @@ export interface Dom {
   teleplotDotEl: HTMLElement;
   // Filters / search chrome
   moduleBtnsEl: HTMLElement;
+  moduleOverflowEl: HTMLElement;
+  moduleOverflowToggleBtn: HTMLButtonElement;
   logSearchInput: HTMLInputElement;
   searchFilterBtn: HTMLButtonElement;
   highlightLinesBtn: HTMLButtonElement;
@@ -104,6 +106,8 @@ export function initDom(): void {
   dom.interestDotEl = document.getElementById('interest_dot')!;
   dom.teleplotDotEl = document.getElementById('teleplot_dot')!;
   dom.moduleBtnsEl = document.getElementById('module_buttons')!;
+  dom.moduleOverflowEl = document.getElementById('module_overflow')!;
+  dom.moduleOverflowToggleBtn = document.getElementById('module_overflow_toggle') as HTMLButtonElement;
   dom.logSearchInput = document.getElementById('log_search') as HTMLInputElement;
   dom.searchFilterBtn = document.getElementById('search_filter') as HTMLButtonElement;
   dom.highlightLinesBtn = document.getElementById('highlight_lines') as HTMLButtonElement;
@@ -132,7 +136,10 @@ export function initDom(): void {
   dom.teleplotHideDataBtn = document.getElementById('teleplot_hide_data') as HTMLButtonElement;
 }
 
-export type InfoTab = 'summary' | 'data' | 'diagnosis' | 'interest' | 'teleplot';
+// 'log' only means anything on mobile (see the mobile-tabbar markup and the
+// `body.mobile-pane-log` CSS in index.html) — it has no matching pane inside
+// #info_panel, it just means "show the terminal instead of the info panel".
+export type InfoTab = 'log' | 'summary' | 'data' | 'diagnosis' | 'interest' | 'teleplot';
 
 // Toggle which info-panel pane is visible and which tab button is active.
 export function switchInfoTab(panel: InfoTab): void {
@@ -141,7 +148,21 @@ export function switchInfoTab(panel: InfoTab): void {
   dom.panelDiagnosisEl.hidden = panel !== 'diagnosis';
   dom.panelInterestEl.hidden = panel !== 'interest';
   dom.panelTeleplotEl.hidden = panel !== 'teleplot';
-  document.querySelectorAll<HTMLButtonElement>('.info-tab').forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>('.info-tab, .mobile-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset['panel'] === panel);
   });
+  document.body.classList.toggle('mobile-pane-log', panel === 'log');
+}
+
+// Mobile: below this width, or on a touch-primary device below a slightly
+// wider width, .term-wrap and #info_panel stop sharing the screen side by
+// side (there isn't room) and become full-screen tabs instead — see the
+// media query in index.html, which must stay in sync with this query string.
+// `(pointer: coarse)` keeps a narrow mouse-driven desktop window (e.g.
+// snapped to half a monitor) from being treated the same as a phone.
+const mobileLayoutQuery = window.matchMedia(
+    '(max-width: 720px), (pointer: coarse) and (max-width: 900px)',
+);
+export function isMobileLayout(): boolean {
+  return mobileLayoutQuery.matches;
 }

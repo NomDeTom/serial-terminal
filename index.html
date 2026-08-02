@@ -580,6 +580,29 @@
     }
     .module-btn.active { background: rgba(167,139,250,0.15); color: #a78bfa; border-color: #a78bfa; }
 
+    /* Module chip overflow: past a threshold (logView.ts, MODULE_OVERFLOW_THRESHOLD)
+       the chip list collapses into a popover anchored under its toggle button,
+       instead of wrapping the filter bar across several lines. Below the threshold
+       this wrapper is visually a no-op — same inline chip row as before. */
+    .module-overflow { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+    .module-overflow.collapsed #module_buttons {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 30;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      max-width: min(320px, 90vw);
+      max-height: 260px;
+      overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .module-overflow.collapsed.open #module_buttons { display: flex; }
+    .module-overflow.collapsed #module_overflow_toggle { display: inline-flex; }
+
     /* Log search box + filter chip */
     .log-search {
       background: var(--surface2);
@@ -746,6 +769,16 @@
     /* Charts scale down to the pane width so the panel never scrolls sideways */
     .dp-charts .hc-section { max-width: 100%; min-width: 0; }
     .dp-charts .hc-section svg { max-width: 100%; height: auto; }
+    /* DATA tab only: tiles are packed by masonryLayout.ts (variable heights —
+       e.g. one seen-nodes table per channel — don't tile evenly, so this uses
+       greedy shortest-column placement instead of flex/grid). display:block
+       overrides the flex/grid rules above unconditionally (not just in
+       analysis mode) so tiles behave as plain in-flow boxes during the
+       layout pass's brief measurement step, before being switched to
+       absolute positioning. Teleplot keeps the flex/grid rules above; its
+       tiles are drag-reorderable and depend on row-major DOM order matching
+       visual order. */
+    #dataPlotContent .dp-charts { position: relative; display: block; }
     .hc-head {
       display: flex;
       align-items: center;
@@ -779,8 +812,8 @@
     .dp-plot { cursor: pointer; outline: 1px solid transparent; outline-offset: 2px; border-radius: 4px; transition: outline-color 0.12s, background-color 0.12s; }
     .dp-plot:hover { outline-color: var(--border); }
     .dp-plot.dp-enlarged { outline: 1px solid var(--green); background: rgba(103,234,148,0.05); }
-    .dp-plot.dp-enlarged svg text { font-size: 12px; }
-    .workspace.analysis #dataPlotContent .dp-charts .dp-plot.dp-enlarged { grid-column: span 2; grid-row: span 2; }
+    .dp-plot.dp-enlarged svg text { font-size: 10px; }
+    /* Enlarged width itself comes from data-span (read by masonryLayout.ts), not CSS. */
 
     /* Arrange-by segmented control (Type / A–Z / Order) in the Teleplot controls bar */
     .tp-sort { display: inline-flex; }
@@ -825,6 +858,9 @@
       align-items: start;
     }
     .workspace.analysis .dp-charts .dp-divider { grid-column: 1 / -1; }
+    /* (DATA tab's #dataPlotContent .dp-charts stays display:block here via the
+       higher-specificity ID rule above — this grid only ends up applying to
+       Teleplot's tile grid, which shares the .dp-charts class name.) */
     .workspace.analysis .dp-charts .hc-section {
       background: var(--bg);
       border: 1px solid var(--border);
@@ -911,6 +947,59 @@
     .ns-row { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
     .ns-k { color: var(--muted); }
     .ns-v { color: var(--text); font-weight: 600; text-align: right; }
+
+    /* ── Mobile layout ──
+       Below the breakpoint (kept in sync with the matchMedia query in
+       appContext.ts's isMobileLayout()), .term-wrap and #info_panel stop
+       sharing the screen side by side and become full-screen tabs switched
+       by #mobile_tabbar instead. #info_panel's own internal tab row
+       (.info-header/.boot-toggle) is redundant here — #mobile_tabbar replaces
+       it — so it's hidden rather than shown twice. */
+    .mobile-tabbar {
+      display: none;
+      align-items: center;
+      gap: 2px;
+      padding: 5px 8px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+    .mobile-tab {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 5px 10px;
+      border-radius: 5px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.12s;
+    }
+    .mobile-tab:hover { color: var(--text); }
+    .mobile-tab.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+
+    @media (max-width: 720px), (pointer: coarse) and (max-width: 900px) {
+      .mobile-tabbar { display: flex; }
+      /* .boot-toggle stays — it's a scope switch (since-boot vs all-logs), not
+         a tab, and still applies no matter which mobile pane is showing. */
+      #info_panel .info-header { display: none; }
+      .workspace { position: relative; }
+      .term-wrap, #info_panel {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+      }
+      #info_panel { padding: 0; }            /* drop the desktop edge-strip reservation */
+      #info_panel.collapsed { width: 100%; } /* the desktop collapsed-sidebar state doesn't apply here */
+      .panel-edge { display: none; }         /* desktop-only: resizing/hiding a sidebar beside a terminal */
+      body:not(.mobile-pane-log) .term-wrap { display: none; }
+      body.mobile-pane-log #info_panel { display: none; }
+      .log-search { width: auto; flex: 1 1 80px; min-width: 60px; }
+    }
 
     /* ── Footer ── */
     footer {
@@ -1032,7 +1121,10 @@
       <div class="sep"></div>
       <span class="filter-label">MODULE</span>
       <button id="module_all_none" class="module-btn active" title="Select all / none">±</button>
-      <div id="module_buttons" class="module-buttons"></div>
+      <div id="module_overflow" class="module-overflow">
+        <button id="module_overflow_toggle" class="btn" hidden title="Show all module filters"></button>
+        <div id="module_buttons" class="module-buttons"></div>
+      </div>
       <div class="sep"></div>
     </span>
     <span class="fb-group fb-group-teleplot">
@@ -1059,6 +1151,20 @@
       <button id="save"  class="btn">⬇ Save</button>
       <button id="clear" class="btn">⬜ Clear</button>
     </div>
+  </div>
+
+  <!-- ── Mobile-only full-screen tab bar (index.html mobile media query). On a
+       phone-width viewport, the terminal and the info sidebar stop sharing the
+       screen and become full-screen tabs instead — LOG is the terminal, the
+       rest mirror #info_panel's own tabs. Hidden on desktop, where the
+       terminal is always visible and #info_panel keeps its own tab row. ── -->
+  <div class="mobile-tabbar" id="mobile_tabbar">
+    <button class="mobile-tab active" data-panel="log">Log</button>
+    <button class="mobile-tab" data-panel="summary">Summary</button>
+    <button class="mobile-tab" data-panel="interest">Interest</button>
+    <button class="mobile-tab" data-panel="data">Data</button>
+    <button class="mobile-tab" data-panel="diagnosis">Diag</button>
+    <button class="mobile-tab" data-panel="teleplot">Tele</button>
   </div>
 
   <!-- ── Workspace: terminal + info sidebar (side by side, terminal never resizes vertically) ── -->

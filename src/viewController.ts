@@ -11,7 +11,7 @@ import {
 import {emptySummary} from './deviceSummary';
 import {
   addModuleButton, updateSearchCount, updatePiiButton, refreshInterest,
-  disposeDecorations, discardPendingWrites, SEARCH_DECO,
+  disposeDecorations, discardPendingWrites, syncModuleOverflow, SEARCH_DECO,
 } from './logView';
 import {refreshSummary, syncBootToggle} from './statsView';
 import {refreshTeleplot} from './teleplotView';
@@ -27,6 +27,7 @@ let teleplotFocus = false;
 export function syncChrome(): void {
   dom.moduleBtnsEl.innerHTML = '';
   for (const key of active.seenModules) addModuleButton(active, key);
+  syncModuleOverflow();
 
   document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((b) => {
     b.classList.toggle('active', active.levelFilter.has(b.dataset['level']!));
@@ -112,6 +113,7 @@ export function clearLog(): void {
   s.term.clear();
   if (s === fileSession) dom.fileNameEl.textContent = '';
   dom.moduleBtnsEl.innerHTML = '';
+  syncModuleOverflow();
   dom.summaryEl.innerHTML = '';
   dom.dataPlotEl.innerHTML = '';
   dom.diagnosisEl.innerHTML = '';
