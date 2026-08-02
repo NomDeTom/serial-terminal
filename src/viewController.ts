@@ -98,6 +98,7 @@ export function clearLog(): void {
   const s = active;
   discardPendingWrites(s);
   s.lineHistory.length = 0;
+  s.fullHistory.length = 0;
   s.lineBuffer = '';
   s.pii.reset();
   s.summary = emptySummary();

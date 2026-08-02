@@ -38,7 +38,8 @@ export interface Session {
   search: SearchAddon;
   container: HTMLElement;    // the .term-wrap toggled on view switch
   pii: PiiFilter;
-  lineHistory: string[];
+  lineHistory: string[];   // capped ring-buffer for display/analysis
+  fullHistory: string[];    // unbounded — used only for Save Log
   lineBuffer: string;
   summary: DeviceSummary;
   cumulative: DeviceSummary;
@@ -159,7 +160,7 @@ export function createSession(
   term.open(mount);
   return {
     kind, term, fit, search, container, pii: new PiiFilter(),
-    lineHistory: [], lineBuffer: '',
+    lineHistory: [], fullHistory: [], lineBuffer: '',
     summary: emptySummary(), cumulative: emptySummary(), showAllBoots: false,
     levelFilter: new Set(['D', 'I', 'W', 'E', 'C']),
     searchTerm: '', searchFilter: false, highlightLines: false, hideTeleplotLines: false,
@@ -402,6 +403,7 @@ export function addLine(s: Session, raw: string, deferRender = false): void {
     }
   }
   s.lineHistory.push(clean);
+  s.fullHistory.push(clean);
   updateSummary(clean, s.summary);
   updateSummaryCumulative(clean, s.cumulative);
   if (!deferRender) {
@@ -486,8 +488,8 @@ export function updatePiiButton(): void {
 
 export function saveLog(): void {
   const s = active;
-  if (s.lineHistory.length === 0) return;
-  const lines = s.pii.enabled ? s.lineHistory.map((l) => s.pii.filter(l)) : s.lineHistory;
+  if (s.fullHistory.length === 0) return;
+  const lines = s.pii.enabled ? s.fullHistory.map((l) => s.pii.filter(l)) : s.fullHistory;
   const blob = new Blob(['﻿', lines.join('\n')], {type: 'text/plain;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
