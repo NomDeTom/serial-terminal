@@ -460,7 +460,7 @@ export function rerender(s: Session): void {
   const overflow = s.fullHistory.length - s.lineHistory.length;
   for (let i = 0; i < s.fullHistory.length; i++) {
     const line = s.fullHistory[i];
-    const ann = i >= overflow ? annotateLine(line) : false;
+    const ann = i >= overflow ? annotateLine(line) : undefined;
     const entry = ann ? s.interest[ip++] : undefined;
     if (linePassesFilter(s, line)) {
       const hl = hlTerm && line.toLowerCase().includes(lcTerm);
