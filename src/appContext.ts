@@ -32,6 +32,15 @@ export function setUpdatePortBar(fn: () => void): void {
   updatePortBar = fn;
 }
 
+// Hook registered by interactiveSerial so the view controller can turn off
+// interactive mode when switching to the File view (which has no live port to
+// write to) without importing interactiveSerial (which depends on switchView).
+// eslint-disable-next-line @typescript-eslint/no-empty-function
+export let onViewSwitched: (kind: 'serial' | 'file') => void = () => {};
+export function setOnViewSwitched(fn: (kind: 'serial' | 'file') => void): void {
+  onViewSwitched = fn;
+}
+
 // ── Shared DOM refs (populated once by initDom at bootstrap) ──────────────────
 export interface Dom {
   // Info panel content + panes
@@ -77,6 +86,16 @@ export interface Dom {
   fileProgressEl: HTMLElement;
   fileProgressFillEl: HTMLElement;
   fileProgressPctEl: HTMLElement;
+  // Interactive serial controls
+  interactiveToggleBtn: HTMLButtonElement;
+  interactiveControlsEl: HTMLElement;
+  interactiveStyleTypeBtn: HTMLButtonElement;
+  interactiveStyleEntryBtn: HTMLButtonElement;
+  interactiveTypeHintEl: HTMLElement;
+  interactiveEntryRowEl: HTMLElement;
+  interactiveInputEl: HTMLInputElement;
+  interactiveNewlineCheckbox: HTMLInputElement;
+  interactiveSendBtn: HTMLButtonElement;
   // Toolbar toggles
   bootSinceBtn: HTMLButtonElement;
   bootAllBtn: HTMLButtonElement;
@@ -128,6 +147,15 @@ export function initDom(): void {
   dom.fileProgressEl = document.getElementById('file_progress')!;
   dom.fileProgressFillEl = document.getElementById('file_progress_fill')!;
   dom.fileProgressPctEl = document.getElementById('file_progress_pct')!;
+  dom.interactiveToggleBtn = document.getElementById('interactive_toggle') as HTMLButtonElement;
+  dom.interactiveControlsEl = document.getElementById('interactive_controls')!;
+  dom.interactiveStyleTypeBtn = document.getElementById('interactive_style_type') as HTMLButtonElement;
+  dom.interactiveStyleEntryBtn = document.getElementById('interactive_style_entry') as HTMLButtonElement;
+  dom.interactiveTypeHintEl = document.getElementById('interactive_type_hint')!;
+  dom.interactiveEntryRowEl = document.getElementById('interactive_entry_row')!;
+  dom.interactiveInputEl = document.getElementById('interactive_input') as HTMLInputElement;
+  dom.interactiveNewlineCheckbox = document.getElementById('interactive_newline') as HTMLInputElement;
+  dom.interactiveSendBtn = document.getElementById('interactive_send') as HTMLButtonElement;
   dom.bootSinceBtn = document.getElementById('boot_since') as HTMLButtonElement;
   dom.bootAllBtn = document.getElementById('boot_all') as HTMLButtonElement;
   dom.autoscrollBtn = document.getElementById('autoscroll') as HTMLButtonElement;

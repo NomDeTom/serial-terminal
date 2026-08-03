@@ -20,6 +20,7 @@ import {refreshTeleplot, initTeleplotControls} from './teleplotView';
 import {switchView, clearLog, toggleTeleplotFocus} from './viewController';
 import {initSerial} from './serialSource';
 import {initFile} from './fileSource';
+import {initInteractiveControls} from './interactiveSerial';
 
 document.addEventListener('DOMContentLoaded', async () => {
   initDeviceInfo();
@@ -42,6 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTeleplotControls();
   initAutoscroll();
   initFile();
+  initInteractiveControls();
 
   // View tabs (Live Serial / File)
   document.querySelectorAll<HTMLButtonElement>('.view-tab[data-view]').forEach((btn) => {

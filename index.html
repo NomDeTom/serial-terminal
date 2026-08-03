@@ -113,6 +113,25 @@
     }
     #file_progress_pct { font-size: 11px; color: var(--muted); min-width: 30px; }
 
+    /* Interactive serial mode-bar controls */
+    .ia-seg { display: inline-flex; }
+    .ia-seg-btn {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-right: none;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      transition: all 0.12s;
+    }
+    .ia-seg-btn:last-child { border-right: 1px solid var(--border); border-radius: 0 4px 4px 0; }
+    .ia-seg-btn:first-child { border-radius: 4px 0 0 4px; }
+    .ia-seg-btn:hover { color: var(--text); }
+    .ia-seg-btn.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+    .ia-hint { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
     /* Status dot */
     #statusDot {
       width: 9px; height: 9px; border-radius: 50%;
@@ -1033,6 +1052,7 @@
     <button class="view-tab view-tab-big active" data-view="serial">Live Serial</button>
     <button class="view-tab view-tab-big" data-view="file">📄 File</button>
     <button class="view-tab view-tab-big" id="teleplot_toggle" title="Focus the sidebar on Teleplot charts only">📈 Teleplot</button>
+    <button class="view-tab view-tab-big" id="interactive_toggle" title="Send data to the device over the open serial port">⌨️ Interactive</button>
     <div class="toolbar-right">
       <button id="credits_btn" class="btn" title="Credits">ℹ️ Credits</button>
     </div>
@@ -1100,6 +1120,20 @@
         <span id="file_progress_pct">0%</span>
       </span>
       <input id="file_input" type="file" hidden>
+    </span>
+    <span id="interactive_controls" class="ctrl-group" hidden>
+      <div class="sep"></div>
+      <span class="ia-seg">
+        <button id="interactive_style_type" class="ia-seg-btn active" title="Type directly into the terminal — keystrokes send live">⌨️ Direct Type</button>
+        <button id="interactive_style_entry" class="ia-seg-btn" title="Type a line, then send it">▤ Entry Box</button>
+      </span>
+      <span id="interactive_type_hint" class="ia-hint">Click the terminal, then type — sent live to the device.</span>
+      <span id="interactive_entry_row" class="ctrl-group" hidden>
+        <input id="interactive_input" class="log-search" type="text"
+               placeholder="Type a command, press Enter to send…" autocomplete="off" spellcheck="false" style="width:220px">
+        <label class="ia-hint"><input id="interactive_newline" type="checkbox" checked> append \n</label>
+        <button id="interactive_send" class="btn">Send</button>
+      </span>
     </span>
   </div>
 

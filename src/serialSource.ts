@@ -26,6 +26,36 @@ let portCounter = 1;
 let port: SerialPort | SerialPortPolyfill | undefined;
 let reconnectPort: SerialPort | SerialPortPolyfill | undefined;
 let reader: ReadableStreamDefaultReader | ReadableStreamBYOBReader | undefined;
+let writer: WritableStreamDefaultWriter<Uint8Array> | undefined;
+const encoder = new TextEncoder();
+
+export function isSerialConnected(): boolean {
+  return !!port;
+}
+
+// Interactive-serial's only way to reach the wire — writes straight to the
+// open port. No-ops (rather than throwing) if nothing is connected, since
+// callers already gate on isSerialConnected() but a disconnect can still
+// race a send in flight.
+export async function sendSerialData(data: string): Promise<void> {
+  if (!port?.writable) return;
+  if (!writer) writer = port.writable.getWriter();
+  try {
+    await writer.write(encoder.encode(data));
+  } catch (e) {
+    if (e instanceof Error) {
+      serialSession.term.writeln(`\x1b[31m<SEND ERROR: ${e.message}>\x1b[0m`);
+    }
+  }
+}
+
+function releaseWriter(): void {
+  if (!writer) return;
+  try {
+    writer.releaseLock();
+  } catch {/* ignore */}
+  writer = undefined;
+}
 
 function findPortOption(p: SerialPort | SerialPortPolyfill): PortOption | null {
   for (let i = 0; i < dom.portSelector.options.length; ++i) {
@@ -163,6 +193,7 @@ export async function connectToPort(): Promise<void> {
   try {
     await port.open(options);
     dom.connectButton.disabled = false;
+    if (port.writable) writer = port.writable.getWriter();
   } catch (e) {
     if (e instanceof Error) {
       serialSession.term.writeln(`\x1b[31m<ERROR: ${e.message}>\x1b[0m`);
@@ -207,6 +238,7 @@ export async function connectToPort(): Promise<void> {
 
   if (port) {
     const droppedPort = port;
+    releaseWriter();
     try {
       await droppedPort.close();
     } catch {/* ignore */}
@@ -218,6 +250,7 @@ export async function connectToPort(): Promise<void> {
 async function disconnectFromPort(): Promise<void> {
   const localPort = port;
   port = undefined;
+  releaseWriter();
   await reader?.cancel();
   if (localPort) {
     try {

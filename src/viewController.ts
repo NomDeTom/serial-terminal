@@ -6,7 +6,7 @@
  * without importing the bootstrap.
  */
 import {
-  dom, active, serialSession, fileSession, setActive, switchInfoTab, updatePortBar,
+  dom, active, serialSession, fileSession, setActive, switchInfoTab, updatePortBar, onViewSwitched,
 } from './appContext';
 import {emptySummary} from './deviceSummary';
 import {
@@ -80,6 +80,9 @@ export function switchView(kind: 'serial' | 'file'): void {
 
   // Port bar visibility depends on serial port history (owned by serialSource).
   updatePortBar();
+  // Interactive serial (owned by interactiveSerial) only applies to the live
+  // port — let it turn itself off when there's nothing to write to.
+  onViewSwitched(kind);
 
   syncChrome();
   active.fit.fit();
