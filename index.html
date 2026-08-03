@@ -210,15 +210,32 @@
       position: relative;
     }
 
-    /* Terminal wrapper — size is stable; info panel is a sibling, not a flex child */
+    /* Terminal wrapper — size is stable; info panel is a sibling, not a flex child.
+       display:flex column so the interactive-serial entry bar (Live Serial view
+       only) can sit below the terminal as a second flex item rather than
+       overlapping it; File view still has just the one flex:1 child, unaffected. */
     .term-wrap {
       flex: 1;
       min-width: 0;
       min-height: 0;
       position: relative;
+      display: flex;
+      flex-direction: column;
     }
     .term-wrap[hidden] { display: none; }
-    #terminal_serial, #terminal_file { width: 100%; height: 100%; }
+    #terminal_serial, #terminal_file { width: 100%; flex: 1; min-height: 0; }
+
+    /* Interactive serial entry box, directly under the log */
+    .interactive-entry-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .interactive-entry-bar[hidden] { display: none; }
 
     /* Always-on terminal scrollbar so it's obvious the log can scroll */
     .xterm-viewport { overflow-y: scroll !important; }
@@ -1106,6 +1123,14 @@
       <div class="sep"></div>
       <label><input id="reconnect" type="checkbox" checked> Reconnect</label>
       <label><input id="grab_next" type="checkbox"> Grab next</label>
+      <span id="interactive_controls" class="ctrl-group" hidden>
+        <div class="sep"></div>
+        <span class="ia-seg">
+          <button id="interactive_style_type" class="ia-seg-btn active" title="Type directly into the terminal — keystrokes send live">⌨️ Direct Type</button>
+          <button id="interactive_style_entry" class="ia-seg-btn" title="Type a line in the box below the terminal, then send it">▤ Entry Box</button>
+        </span>
+        <span id="interactive_type_hint" class="ia-hint">Click the terminal, then type — sent live to the device.</span>
+      </span>
       <span class="api-toggle">
         <span class="api-label">Web Serial API:</span>
         <strong id="api_current">Native</strong>
@@ -1120,20 +1145,6 @@
         <span id="file_progress_pct">0%</span>
       </span>
       <input id="file_input" type="file" hidden>
-    </span>
-    <span id="interactive_controls" class="ctrl-group" hidden>
-      <div class="sep"></div>
-      <span class="ia-seg">
-        <button id="interactive_style_type" class="ia-seg-btn active" title="Type directly into the terminal — keystrokes send live">⌨️ Direct Type</button>
-        <button id="interactive_style_entry" class="ia-seg-btn" title="Type a line, then send it">▤ Entry Box</button>
-      </span>
-      <span id="interactive_type_hint" class="ia-hint">Click the terminal, then type — sent live to the device.</span>
-      <span id="interactive_entry_row" class="ctrl-group" hidden>
-        <input id="interactive_input" class="log-search" type="text"
-               placeholder="Type a command, press Enter to send…" autocomplete="off" spellcheck="false" style="width:220px">
-        <label class="ia-hint"><input id="interactive_newline" type="checkbox" checked> append \n</label>
-        <button id="interactive_send" class="btn">Send</button>
-      </span>
     </span>
   </div>
 
@@ -1212,6 +1223,14 @@
     <!-- Live serial terminal -->
     <div class="term-wrap" id="view_serial">
       <div id="terminal_serial"></div>
+      <!-- Interactive serial (entry-box style): sits directly below the log,
+           only for the live serial view — nothing to send to from a file. -->
+      <div id="interactive_entry_row" class="interactive-entry-bar" hidden>
+        <input id="interactive_input" class="log-search" type="text"
+               placeholder="Type a command, press Enter to send…" autocomplete="off" spellcheck="false" style="flex:1">
+        <label class="ia-hint"><input id="interactive_newline" type="checkbox" checked> append \n</label>
+        <button id="interactive_send" class="btn">Send</button>
+      </div>
     </div>
 
     <!-- File analysis terminal (own session, no serial controls) -->
