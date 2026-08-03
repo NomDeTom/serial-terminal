@@ -20,6 +20,13 @@ export interface Annotation {
   title: string;     // short label for the Interest tab
   comment: string;   // explanation shown on hover and in the Interest detail
   severity: Severity;
+  // Whether a match is worth surfacing in the aggregated Lines of Interest tab.
+  // Defaults to true when omitted. Set to false for routine, every-boot (or
+  // every-packet) narration that's still worth explaining on hover in the raw
+  // log, but would otherwise bury genuinely notable lines in the Interest list —
+  // e.g. "WarmStore replayed" or "PKI pubkey rebuilt" happen on essentially
+  // every boot and carry no diagnostic signal on their own.
+  interesting?: boolean;
 }
 
 export const ANNOTATIONS: Annotation[] = [
@@ -242,14 +249,14 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── GPS ────────────────────────────────────────────────────────────────────
   {
-    id: 'gps-probe-trying', section: '§A', severity: 'info',
+    id: 'gps-probe-trying', section: '§A', severity: 'info', interesting: false,
     test: /\[GPS\] Trying \$.*Family\)/,
     title: 'GPS auto-detect',
     comment: 'The firmware is auto-detecting the GPS chipset by sending probe commands. Each line is a ' +
       'different chip family being tested.',
   },
   {
-    id: 'gps-no-gnss', section: '§A', severity: 'info',
+    id: 'gps-no-gnss', section: '§A', severity: 'info', interesting: false,
     test: /\[GPS\] No GNSS Module \(baudrate \d+\)/,
     title: 'No GPS at baud',
     comment: 'No GPS chip responded at this baud rate. Normal during auto-detection — the firmware will ' +
@@ -269,33 +276,33 @@ export const ANNOTATIONS: Annotation[] = [
       'reboot.',
   },
   {
-    id: 'gps-power', section: '§B', severity: 'info',
+    id: 'gps-power', section: '§B', severity: 'info', interesting: false,
     test: /GPS power state move from/,
     title: 'GPS power change',
     comment: 'The GPS hardware was powered up (OFF→ACTIVE) or down (ACTIVE→OFF).',
   },
   {
-    id: 'gps-cached', section: '§BBBB', severity: 'info',
+    id: 'gps-cached', section: '§BBBB', severity: 'info', interesting: false,
     test: /Using cached GPS probe|Loaded cached GPS probe/,
     title: 'GPS probe cached',
     comment: 'The GPS chip was identified on a previous boot; the full probe scan is skipped and the ' +
       'cached chip + baud are used.',
   },
   {
-    id: 'gps-no-lock', section: '§TTT', severity: 'info',
+    id: 'gps-no-lock', section: '§TTT', severity: 'info', interesting: false,
     test: /No GPS lock/,
     title: 'No GPS lock',
     comment: 'No satellite fix yet — position data is unavailable.',
   },
   {
-    id: 'position-fix', section: '§TTT', severity: 'info',
+    id: 'position-fix', section: '§TTT', severity: 'info', interesting: false,
     test: /POSITION node=.*siv=\d+/,
     title: 'Position fix',
     comment: 'Full position fix data. siv = satellites in view; msl = altitude in mm above sea level; ' +
       'pdop/hdop/vdop are accuracy estimates.',
   },
   {
-    id: 'truncate-pos', section: '§UUU', severity: 'info',
+    id: 'truncate-pos', section: '§UUU', severity: 'info', interesting: false,
     test: /Truncate phone position to channel precision/,
     title: 'Position truncated',
     comment: 'Position precision reduced to the channel privacy setting before broadcasting. Higher ' +
@@ -304,72 +311,72 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── Radio init / RF config ─────────────────────────────────────────────────
   {
-    id: 'rf95-none', section: '§C', severity: 'info',
+    id: 'rf95-none', section: '§C', severity: 'info', interesting: false,
     test: /RF95 init result|No RF95 radio/,
     title: 'No RF95 (expected)',
     comment: 'RFM95/SX1276 radio not found (expected on this hardware). The firmware will try the SX126x ' +
       'driver next.',
   },
   {
-    id: 'sx-patch', section: '§C', severity: 'info',
+    id: 'sx-patch', section: '§C', severity: 'info', interesting: false,
     test: /Applied SX1262 register .* patch/,
     title: 'SX1262 RX patch',
     comment: 'A hardware-specific patch was applied to improve receive sensitivity on this SX1262 variant.',
   },
   {
-    id: 'tcxo', section: '§D', severity: 'info',
+    id: 'tcxo', section: '§D', severity: 'info', interesting: false,
     test: /(SX126X|LR11X0)_DIO3_TCXO_VOLTAGE/,
     title: 'TCXO reference',
     comment: 'DIO3 is supplying the reference voltage to the temperature-compensated crystal oscillator.',
   },
   {
-    id: 'rf-switch', section: '§D', severity: 'info',
+    id: 'rf-switch', section: '§D', severity: 'info', interesting: false,
     test: /Set DIO2 as RF switch|as RXEN/,
     title: 'RF switch pins',
     comment: 'GPIO pins are being configured to control the TX/RX antenna switch.',
   },
   {
-    id: 'fem', section: '§11', severity: 'info',
+    id: 'fem', section: '§11', severity: 'info', interesting: false,
     test: /Detected \S+ LoRa FEM/,
     title: 'LoRa FEM detected',
     comment: 'A LoRa front-end module (PA/LNA) was detected. The FEM adds gain, so the final TX power is ' +
       'adjusted accordingly.',
   },
   {
-    id: 'rx-gain', section: '§9', severity: 'info',
+    id: 'rx-gain', section: '§9', severity: 'info', interesting: false,
     test: /Set RX gain to/,
     title: 'RX gain mode',
     comment: 'The receive gain mode was set (boosted = best sensitivity; power-saving = lower current).',
   },
   {
-    id: 'agc-reset', section: '§18', severity: 'info',
+    id: 'agc-reset', section: '§18', severity: 'info', interesting: false,
     test: /SX126x AGC reset/,
     title: 'AGC recalibration',
     comment: 'Normal periodic radio recalibration. The SX126x resets its automatic gain control and ' +
       'recalibrates RF blocks, roughly once per minute at idle.',
   },
   {
-    id: 'false-preamble', section: '§18', severity: 'info',
+    id: 'false-preamble', section: '§18', severity: 'info', interesting: false,
     test: /Ignore false preamble detection/,
     title: 'False preamble',
     comment: 'The radio woke thinking it heard a packet start, but it was noise. Normal in congested RF; ' +
       'high rates can indicate strong interference.',
   },
   {
-    id: 'lora-bitrate', section: '§E', severity: 'info',
+    id: 'lora-bitrate', section: '§E', severity: 'info', interesting: false,
     test: /LoRA bitrate =/i,
     title: 'LoRa bitrate',
     comment: 'Effective LoRa data rate in bytes/second at the current modem settings. Lower spreading ' +
       'factors give higher throughput.',
   },
   {
-    id: 'slot-time', section: '§E', severity: 'info',
+    id: 'slot-time', section: '§E', severity: 'info', interesting: false,
     test: /Slot time: \d+ msec/,
     title: 'Slot / preamble time',
     comment: 'CAD slot time and minimum preamble listen time for the current modem preset.',
   },
   {
-    id: 'numfreqslots', section: '§12', severity: 'info',
+    id: 'numfreqslots', section: '§12', severity: 'info', interesting: false,
     test: /numFreqSlots: \d+ x/,
     title: 'Frequency slots',
     comment: 'Number of frequency slots in this region × bandwidth. Fewer slots = higher collision chance.',
@@ -381,7 +388,7 @@ export const ANNOTATIONS: Annotation[] = [
     comment: 'A frequency slot is explicitly pinned rather than auto-calculated from the channel number.',
   },
   {
-    id: 'tx-power', section: '§13', severity: 'info',
+    id: 'tx-power', section: '§13', severity: 'info', interesting: false,
     test: /Requested Tx power: \d+ dBm/,
     title: 'TX power request',
     comment: 'Requested TX power plus the device LoRa gain offset. Final power may be lower due to ' +
@@ -390,13 +397,13 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── Crypto / PKI ───────────────────────────────────────────────────────────
   {
-    id: 'regen-pki-pub', section: '§F', severity: 'info',
+    id: 'regen-pki-pub', section: '§F', severity: 'info', interesting: false,
     test: /Regenerate PKI public key/,
     title: 'PKI pubkey rebuild',
     comment: 'Reconstructing the public key from the stored private key. Normal at every boot.',
   },
   {
-    id: 'dh-key', section: '§F', severity: 'info',
+    id: 'dh-key', section: '§F', severity: 'info', interesting: false,
     test: /Set DH private key/,
     title: 'DH key loaded',
     comment: 'The Diffie-Hellman private key was loaded for encrypted communications.',
@@ -417,28 +424,28 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── WarmStore / replay / NodeDB ────────────────────────────────────────────
   {
-    id: 'warmstore-replay', section: '§G', severity: 'info',
+    id: 'warmstore-replay', section: '§G', severity: 'info', interesting: false,
     test: /WarmStore: replayed/,
     title: 'WarmStore replay',
     comment: 'The WarmStore ring buffer was loaded; neighbour nodes were reconstructed from the previous ' +
       'session so the map populates immediately.',
   },
   {
-    id: 'warmstore-absorb', section: '§20', severity: 'info',
+    id: 'warmstore-absorb', section: '§20', severity: 'info', interesting: false,
     test: /WarmStore absorb/,
     title: 'WarmStore absorb',
     comment: 'A node evicted from the main database was saved to a compact ring buffer for quick reload ' +
       'later. Normal on full meshes.',
   },
   {
-    id: 'replay-position', section: '§G', severity: 'info',
+    id: 'replay-position', section: '§G', severity: 'info', interesting: false,
     test: /Begin position replay|Begin telemetry replay|Replay drain complete/,
     title: 'Cached data replay',
     comment: 'The device is sending cached position/telemetry from other nodes to the app so the map ' +
       'populates immediately on connect.',
   },
   {
-    id: 'nodedb-load', section: '§5', severity: 'info',
+    id: 'nodedb-load', section: '§5', severity: 'info', interesting: false,
     test: /Loaded saved nodedatabase/,
     title: 'NodeDB loaded',
     comment: 'The saved node database was loaded from flash, with counts of nodes that have position, ' +
@@ -451,14 +458,14 @@ export const ANNOTATIONS: Annotation[] = [
     comment: 'A fresh empty node database was created (the previous one was discarded).',
   },
   {
-    id: 'transmit-history', section: '§JJ', severity: 'info',
+    id: 'transmit-history', section: '§JJ', severity: 'info', interesting: false,
     test: /TransmitHistory: loaded/,
     title: 'TX history loaded',
     comment: 'Recently-relayed packet IDs were loaded from flash to avoid re-broadcasting them after a ' +
       'reboot.',
   },
   {
-    id: 'cleanup-meshdb', section: '§29', severity: 'info',
+    id: 'cleanup-meshdb', section: '§29', severity: 'info', interesting: false,
     test: /cleanupMeshDB purged/,
     title: 'NodeDB cleanup',
     comment: 'Expired or unreachable nodes were removed from the database. Normal housekeeping.',
@@ -466,33 +473,33 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── Sensors / power ────────────────────────────────────────────────────────
   {
-    id: 'i2c-acc', section: '§M', severity: 'info',
+    id: 'i2c-acc', section: '§M', severity: 'info', interesting: false,
     test: /acc_info = \d+/,
     title: 'Accelerometer ID',
     comment: 'Accelerometer chip identifier (36 = QMA6100P, 38 = LIS3DH, 0 = none detected).',
   },
   {
-    id: 'accel-init', section: '§N', severity: 'info',
+    id: 'accel-init', section: '§N', severity: 'info', interesting: false,
     test: /AccelerometerThread::init ok/,
     title: 'Motion sensor ok',
     comment: 'The accelerometer / motion sensor initialised successfully — used for motion wakeup and ' +
       'position triggers.',
   },
   {
-    id: 'max17048', section: '§TT', severity: 'info',
+    id: 'max17048', section: '§TT', severity: 'info', interesting: false,
     test: /max17048.*not ready/,
     title: 'No fuel gauge',
     comment: 'The MAX17048 precision fuel gauge was not found; battery level is estimated from ADC ' +
       'voltage instead.',
   },
   {
-    id: 'battery-adc', section: '§TT', severity: 'info',
+    id: 'battery-adc', section: '§TT', severity: 'info', interesting: false,
     test: /Use analog input \d+ for battery level/,
     title: 'Battery ADC pin',
     comment: 'Battery voltage is measured via the ADC on the given GPIO pin.',
   },
   {
-    id: 'battery-hw', section: '§51', severity: 'info',
+    id: 'battery-hw', section: '§51', severity: 'info', interesting: false,
     test: /battery hardware detected/,
     title: 'Battery HW ok',
     comment: 'Battery monitoring hardware was confirmed present and functional.',
@@ -500,14 +507,14 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── Time / clock ───────────────────────────────────────────────────────────
   {
-    id: 'timezone', section: '§O', severity: 'info',
+    id: 'timezone', section: '§O', severity: 'info', interesting: false,
     test: /Set Timezone to GMT/,
     title: 'Timezone = GMT',
     comment: 'The device timezone defaults to UTC at boot. The app will push the correct local timezone ' +
       'on connect.',
   },
   {
-    id: 'time-ntp', section: '§P', severity: 'info',
+    id: 'time-ntp', section: '§P', severity: 'info', interesting: false,
     test: /Upgrade time to quality NTP|Time source acquired/,
     title: 'Clock synced',
     comment: 'The device clock was synchronised to phone/NTP time. Packet timestamps are now accurate.',
@@ -772,14 +779,14 @@ export const ANNOTATIONS: Annotation[] = [
 
   // ── Misc boot / housekeeping ───────────────────────────────────────────────
   {
-    id: 'random-seed', section: '§KKK', severity: 'info',
+    id: 'random-seed', section: '§KKK', severity: 'info', interesting: false,
     test: /Set random seed \d+/,
     title: 'RNG seeded',
     comment: 'The random number generator was seeded. If it followed a no-entropy warning, values are ' +
       'less unpredictable until the radio initialises.',
   },
   {
-    id: 'region-fallback', section: '§28', severity: 'info',
+    id: 'region-fallback', section: '§28', severity: 'info', interesting: false,
     test: /Wanted region \d+, using (?!UNSET)\w+/,
     title: 'Region set',
     comment: 'The LoRa region was applied during init (before the radio Set line). The first value is the ' +
@@ -800,7 +807,7 @@ export const ANNOTATIONS: Annotation[] = [
       'is loops since the last full power cycle.',
   },
   {
-    id: 'optional-prefs', section: '§L', severity: 'info',
+    id: 'optional-prefs', section: '§L', severity: 'info', interesting: false,
     test: /Could not open \/ read \/prefs\/(uiconfig|ringtone|cannedConf)\.proto/,
     title: 'Optional prefs',
     comment: 'An optional settings file does not exist yet — defaults are used. It is created the first ' +

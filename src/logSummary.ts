@@ -1679,6 +1679,7 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
   // Lines without an uptime stamp (bootloader spew, other log formats) still
   // count toward logLines but can't move the clock.
   (line, s) => {
+    if (s.logLines === 0) s._firstLineWasBoot = /S:B:\d+,/.test(line);
     s.logLines++;
     const {uptime} = parseLine(line);
     if (uptime === undefined || !Number.isFinite(uptime)) return;

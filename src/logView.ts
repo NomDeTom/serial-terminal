@@ -30,6 +30,16 @@ interface InterestEntry {
   marker?: IMarker;         // present only while the line is rendered (passes filters)
 }
 
+// Whether a matched annotation gets an entry in the aggregated Lines of
+// Interest list. Routine/every-boot annotations (interesting: false) still
+// get a gutter marker and hover explanation in the raw log — they just don't
+// also clutter the aggregate list. Every place below that walks the interest
+// list in lockstep with annotated lines must use this, not a bare `ann` truthy
+// check, or the two fall out of sync.
+function isInterestWorthy(ann: Annotation | undefined): ann is Annotation {
+  return !!ann && ann.interesting !== false;
+}
+
 // All per-session state: each of the Live Serial and File views owns one.
 export interface Session {
   kind: 'serial' | 'file';
@@ -409,7 +419,7 @@ export function addLine(s: Session, raw: string, deferRender = false): void {
   if (s.lineHistory.length >= MAX_HISTORY) {
     const removed = s.lineHistory.shift();
     // Keep the interest list aligned with the annotated lines still in history.
-    if (removed !== undefined && annotateLine(removed)) {
+    if (removed !== undefined && isInterestWorthy(annotateLine(removed))) {
       const old = s.interest.shift();
       if (old) {
         s.interestBySeq.delete(old.seq);
@@ -431,7 +441,7 @@ export function addLine(s: Session, raw: string, deferRender = false): void {
   }
   const ann = annotateLine(clean);
   let entry: InterestEntry | undefined;
-  if (ann) {
+  if (isInterestWorthy(ann)) {
     entry = {seq: s.interestSeq++, ann, snippet: clean};
     s.interest.push(entry);
     s.interestBySeq.set(entry.seq, entry);
@@ -476,7 +486,7 @@ export function rerender(s: Session): void {
   for (let i = 0; i < s.fullHistory.length; i++) {
     const line = s.fullHistory[i];
     const ann = i >= overflow ? annotateLine(line) : undefined;
-    const entry = ann ? s.interest[ip++] : undefined;
+    const entry = isInterestWorthy(ann) ? s.interest[ip++] : undefined;
     if (linePassesFilter(s, line)) {
       const hl = hlTerm && line.toLowerCase().includes(lcTerm);
       writeAndDecorate(s, line, ann, entry, hl);

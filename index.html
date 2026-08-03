@@ -236,6 +236,7 @@
       flex-shrink: 0;
     }
     .interactive-entry-bar[hidden] { display: none; }
+    .ia-hint-row { justify-content: center; }
 
     /* Always-on terminal scrollbar so it's obvious the log can scroll */
     .xterm-viewport { overflow-y: scroll !important; }
@@ -1009,6 +1010,27 @@
        fixed-legend charts use inline. */
     .hc-legend-wrap { flex-wrap: wrap; gap: 3px 9px; line-height: 1.5; }
     .hc-legend-wrap .hc-dot { margin-right: 3px; }
+    /* Position mini-map: local world-outline SVG (public/images/world-land.svg)
+       with a pin positioned by percentage over the equirectangular projection. */
+    .hc-world-map {
+      position: relative;
+      width: 100%;
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #0f1416;
+      line-height: 0;
+    }
+    .hc-world-img { width: 100%; height: auto; display: block; opacity: 0.9; }
+    .hc-world-pin {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      margin: -4px 0 0 -4px;
+      border-radius: 50%;
+      background: #67EA94;
+      box-shadow: 0 0 0 4px rgba(103,234,148,0.25), 0 0 6px rgba(103,234,148,0.8);
+    }
     /* Node-status text tile */
     .ns-tile { display: flex; flex-direction: column; gap: 3px; min-width: 160px; }
     /* Seen-nodes table (data tab + analysis mode) */
@@ -1274,6 +1296,7 @@
             <option value="230400">230400</option>
             <option value="460800">460800</option>
             <option value="921600">921600</option>
+            <option value="1500000">1500000</option>
             <option value="custom">Custom…</option>
           </select>
         </label>
@@ -1308,7 +1331,6 @@
           <button id="interactive_style_type" class="ia-seg-btn active" title="Type directly into the terminal — keystrokes send live">⌨️ Direct Type</button>
           <button id="interactive_style_entry" class="ia-seg-btn" title="Type a line in the box below the terminal, then send it">▤ Entry Box</button>
         </span>
-        <span id="interactive_type_hint" class="ia-hint">Click the terminal, then type — sent live to the device.</span>
       </span>
       <span class="api-toggle">
         <span class="api-label">Web Serial API:</span>
@@ -1418,6 +1440,12 @@
                placeholder="Type a command, press Enter to send…" autocomplete="off" spellcheck="false" style="flex:1">
         <label class="ia-hint"><input id="interactive_newline" type="checkbox" checked> append \n</label>
         <button id="interactive_send" class="btn">Send</button>
+      </div>
+      <!-- Interactive serial (direct-type style): same bottom slot as the entry
+           bar above, shown instead of it — there's no box to type into, so this
+           just confirms typing into the terminal is live. -->
+      <div id="interactive_type_hint" class="interactive-entry-bar ia-hint-row" hidden>
+        <span class="ia-hint">Click the terminal, then type — sent live to the device.</span>
       </div>
     </div>
 

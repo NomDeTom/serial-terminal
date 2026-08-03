@@ -22,10 +22,10 @@ function syncInteractiveUi(): void {
   dom.interactiveControlsEl.hidden = !interactiveMode;
   dom.interactiveStyleTypeBtn.classList.toggle('active', interactiveStyle === 'type');
   dom.interactiveStyleEntryBtn.classList.toggle('active', interactiveStyle === 'entry');
-  dom.interactiveTypeHintEl.hidden = interactiveStyle !== 'type';
-  // The entry bar lives under the terminal now (not nested under
-  // interactiveControlsEl), so its own hidden state has to account for
+  // Both bars live under the terminal now (not nested under
+  // interactiveControlsEl), so their hidden state has to account for
   // interactiveMode itself, not just which style is selected.
+  dom.interactiveTypeHintEl.hidden = !(interactiveMode && interactiveStyle === 'type');
   const showEntryBar = interactiveMode && interactiveStyle === 'entry';
   dom.interactiveEntryRowEl.hidden = !showEntryBar;
   // The terminal's available height changed (entry bar appeared/disappeared) —

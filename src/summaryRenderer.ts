@@ -34,6 +34,32 @@ function fmtCoord(raw: number): string {
   return (raw / 1e7).toFixed(5) + '°';
 }
 
+// Compact "you are here" widget for the Data pane: a world outline (equirect-
+// angular, public-domain Natural Earth 110m land data, simplified and baked in
+// at build time — see .notes/ for the generator) with a pin over the device's
+// last-known fix. Only one point is ever plotted since there's no position
+// history or peer positions tracked. The map ships as a local static asset
+// (public/images/world-land.svg) rather than fetched tiles: no network
+// request, no third-party service, and no live leak of device coordinates.
+export function renderPositionMap(s: DeviceSummary): string {
+  if (s.localLat === undefined || s.localLon === undefined) return '';
+  const lat = s.localLat / 1e7; const lon = s.localLon / 1e7;
+  const latStr = `${Math.abs(lat).toFixed(5)}°${lat >= 0 ? 'N' : 'S'}`;
+  const lonStr = `${Math.abs(lon).toFixed(5)}°${lon >= 0 ? 'E' : 'W'}`;
+  const px = ((lon + 180) / 360 * 100).toFixed(2);
+  const py = ((90 - lat) / 180 * 100).toFixed(2);
+  const map = `<div class="hc-world-map">` +
+    `<img class="hc-world-img" src="/images/world-land.svg" alt="World map" width="360" height="180">` +
+    `<span class="hc-world-pin" style="left:${px}%;top:${py}%"></span>` +
+    `</div>`;
+  const caption = `<div class="hc-legend">${latStr}, ${lonStr}` +
+    (s.localAlt !== undefined ? ` · ${Math.round(s.localAlt / 1000)}m alt` : '') +
+    (s.gpsSiv !== undefined ? ` · ${s.gpsSiv} sats` : '') + '</div>';
+  return `<div class="hc-section">` +
+    `<div class="hc-head"><span class="hc-label">Position</span></div>` +
+    `${map}${caption}</div>`;
+}
+
 // Descriptive / identity / config / status / normal-traffic fields. These do NOT
 // make a summary "have events". Everything else on DeviceSummary (and not _-prefixed)
 // is treated as a noteworthy event, so newly added fault/event fields surface
@@ -110,21 +136,46 @@ function isPresent(v: unknown): boolean {
   return false;
 }
 
-export function renderSummary(s: DeviceSummary): string {
+// thisBoot/allBoots default to s so a caller scoped to a single boot-window
+// (e.g. an unscoped summary with no separate cumulative copy) still renders
+// sensibly — they only need to differ when the caller wants both figures
+// shown together regardless of which scope the rest of the panel is in.
+export function renderSummary(
+    s: DeviceSummary, thisBoot: DeviceSummary = s, allBoots: DeviceSummary = s): string {
   const hasNak = Object.keys(s.nakErrors).length > 0;
   const hasEvents = (Object.keys(s) as (keyof DeviceSummary)[]).some(
       (k) => !String(k).startsWith('_') && !NON_EVENT_FIELDS.has(k) && isPresent(s[k]),
   );
   if (!s.hardware && !s.firmware && !s.radioType && !hasEvents) return '';
 
-  const rows: Array<[string, string, string?]> = [];
+  // ── Log section (top of panel) — always both scopes at once, independent of
+  // whichever scope the rest of the summary below is currently showing. ────────
+  const logRows: Array<[string, string, string?]> = [];
 
-  if (s.logLines > 0) {
-    const dur = s.logDurationSecs > 0 ? ` · ${fmtUptime(s.logDurationSecs)}` : '';
-    rows.push(['Log length', `${s.logLines.toLocaleString()} lines${dur}`,
-      'Lines parsed into this summary, and the time they span according to the ' +
-      'log\'s own uptime stamps (gaps across reboots excluded)']);
+  if (thisBoot.logLines > 0) {
+    const dur = thisBoot.logDurationSecs > 0 ? ` · ${fmtUptime(thisBoot.logDurationSecs)}` : '';
+    logRows.push(['Log length (this boot)', `${thisBoot.logLines.toLocaleString()} lines${dur}`,
+      'Lines parsed since the most recent reboot, and the time they span ' +
+      'according to the log\'s own uptime stamps']);
   }
+  if (allBoots.logLines > 0 && allBoots.logLines !== thisBoot.logLines) {
+    const dur = allBoots.logDurationSecs > 0 ? ` · ${fmtUptime(allBoots.logDurationSecs)}` : '';
+    logRows.push(['Log length (all boots)', `${allBoots.logLines.toLocaleString()} lines${dur}`,
+      'Lines parsed across the whole capture, including boots before the most recent one']);
+  }
+  // Subtract the initial "boot into capture" only when the log actually starts
+  // at that boot — if capture began mid-boot-cycle (no leading S:B line), every
+  // S:B line seen is a genuine reboot and none should be discounted.
+  if (allBoots.boots > 0) {
+    const reboots = allBoots._firstLineWasBoot ? allBoots.boots - 1 : allBoots.boots;
+    if (reboots > 0) {
+      logRows.push(['Reboots (in log)', String(reboots),
+        'S:B boot banners seen in this capture that represent a reboot during ' +
+        'the capture, rather than the boot the log started at']);
+    }
+  }
+
+  const rows: Array<[string, string, string?]> = [];
 
   if (s.nodeName) rows.push(['Name', s.nodeName]);
   if (s.nodeId) rows.push(['Node ID', `<code>${s.nodeId}</code>`]);
@@ -1088,6 +1139,7 @@ export function renderSummary(s: DeviceSummary): string {
       `<span class="sum-value">${value}</span></div>`;
   }
 
+  const logDivider = logRows.length ? '<div class="sum-divider">LOG</div>' : '';
   const memDivider = memRows.length ? '<div class="sum-divider">MEMORY</div>' : '';
   const modDivider = modRows.length ? '<div class="sum-divider">MODULE STATUS</div>' : '';
   const evtDivider = evtRows.length ? '<div class="sum-divider sum-divider-err">EVENTS</div>' : '';
@@ -1099,6 +1151,7 @@ export function renderSummary(s: DeviceSummary): string {
   const filteredRows = rows.filter(([l, v]) => l !== '' || v !== '');
 
   const grid = '<div class="sum-grid">' +
+    logDivider + logRows.map(renderRow).join('') +
     filteredRows.map(renderRow).join('') +
     memDivider + memRows.map(renderRow).join('') +
     modDivider + modRows.map(renderRow).join('') +

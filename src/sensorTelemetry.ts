@@ -443,7 +443,7 @@ function polylineFor(
 
 function utilChart(
     metric: string, label: string, rows: SensorRow[],
-    opts: ChartOptions, averageOnly: boolean): string {
+    opts: ChartOptions, averageOnly: boolean, thisNodeOnly: boolean): string {
   const mine = rows.filter((r) => normMetric(r.metric) === metric);
   if (mine.length === 0) return '';
 
@@ -506,12 +506,17 @@ function utilChart(
   const colorOf = (src: string, idx: number): string =>
     src === 'local' ? LOCAL_COLOR : NODE_PALETTE[(idx - 1 + NODE_PALETTE.length) % NODE_PALETTE.length];
 
-  if (!averageOnly) {
-    sources.forEach((src, idx) => {
-      out.push(polylineFor(bySource.get(src)!, X, Y, colorOf(src, idx), 1));
-    });
-  }
-  out.push(polylineFor(avg, X, Y, AVG_COLOR, averageOnly ? 1.8 : 2, true));
+  // thisNodeOnly narrows the per-node lines down to 'local'; averageOnly
+  // drops them entirely and wins if both are on, since "just the average"
+  // leaves nothing for a node filter to narrow. The mesh-average line is
+  // itself derived from every node, so thisNodeOnly hides it too — otherwise
+  // "this node" would still show a trace shaped by all the other nodes.
+  const shown = averageOnly ? [] : thisNodeOnly ? sources.filter((src) => src === 'local') : sources;
+  shown.forEach((src) => {
+    out.push(polylineFor(bySource.get(src)!, X, Y, colorOf(src, sources.indexOf(src)), 1));
+  });
+  const showAvg = averageOnly || !thisNodeOnly;
+  if (showAvg) out.push(polylineFor(avg, X, Y, AVG_COLOR, averageOnly ? 1.8 : 2, true));
 
   const ly = (pT + cH + 12).toFixed(1);
   for (let t = 0; t <= 4; t++) {
@@ -523,30 +528,33 @@ function utilChart(
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
     out.join('') + '</svg>';
 
-  const legendItems = [
-    `<span class="hc-dot" style="background:${AVG_COLOR}"></span>mesh avg (${sources.length})`,
-  ];
-  if (!averageOnly) {
-    sources.forEach((src, idx) => {
-      const name = src === 'local' ? 'this node' : src;
-      legendItems.push(`<span class="hc-dot" style="background:${colorOf(src, idx)}"></span>${name}`);
-    });
+  const legendItems: string[] = [];
+  if (showAvg) {
+    legendItems.push(`<span class="hc-dot" style="background:${AVG_COLOR}"></span>mesh avg (${sources.length})`);
   }
+  shown.forEach((src) => {
+    const name = src === 'local' ? 'this node' : src;
+    legendItems.push(`<span class="hc-dot" style="background:${colorOf(src, sources.indexOf(src))}"></span>${name}`);
+  });
   const legend = `<div class="hc-legend hc-legend-wrap">${legendItems.join('')}</div>`;
-  const toggle = `<label class="hc-range"><input type="checkbox" class="dp-avgonly" ` +
+  const avgToggle = `<label class="hc-range"><input type="checkbox" class="dp-avgonly" ` +
     `data-key="${escapeAttr(metric)}"${averageOnly ? ' checked' : ''}>avg only</label>`;
+  // Only worth offering when there's actually a 'local' series to isolate.
+  const thisNodeToggle = bySource.has('local') ?
+    `<label class="hc-range"><input type="checkbox" class="dp-thisnode" ` +
+    `data-key="${escapeAttr(metric)}"${thisNodeOnly ? ' checked' : ''}>this node</label>` : '';
   return `<div class="hc-section">` +
-    `<div class="hc-head"><span class="hc-label">${label}</span>${toggle}</div>` +
+    `<div class="hc-head"><span class="hc-label">${label}</span>${avgToggle}${thisNodeToggle}</div>` +
     `${svg}${legend}</div>`;
 }
 
 // One tile per utilisation metric, keyed for the masonry layout.
 export function renderMultiNodeUtilCharts(
     rows: SensorRow[], opts: ChartOptions,
-    averageOnly: Set<string>): Array<{key: string; html: string}> {
+    averageOnly: Set<string>, thisNodeOnly: Set<string>): Array<{key: string; html: string}> {
   const out: Array<{key: string; html: string}> = [];
   for (const {metric, label} of UTIL_METRICS) {
-    const html = utilChart(metric, label, rows, opts, averageOnly.has(metric));
+    const html = utilChart(metric, label, rows, opts, averageOnly.has(metric), thisNodeOnly.has(metric));
     if (html) out.push({key: `meshUtil:${metric}`, html});
   }
   return out;

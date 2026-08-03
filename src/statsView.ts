@@ -8,7 +8,7 @@ import {dom, active} from './appContext';
 import {
   renderSummary, renderHopChart, renderChannelHashChart, renderNodeStatusTile,
   renderNodeCountChart, renderSeenNodesTable, renderNodeDetailTile,
-  renderNodeChannelChart, renderPeerTelemetryTile,
+  renderNodeChannelChart, renderPeerTelemetryTile, renderPositionMap,
 } from './summaryRenderer';
 import {
   parseLog as parseSensorLog, toSeries, renderTelemetryCharts, renderMultiNodeUtilCharts,
@@ -25,6 +25,7 @@ const dataFixedRange = new Set<string>();   // series keys the user pinned to fi
 const dataEnlarged = new Set<string>();     // chart keys pinned to 2x size by clicking
 const dataLogScale = new Set<string>();     // chart keys pinned to a log Y-scale
 const dataAvgOnly = new Set<string>();      // mesh-util metrics showing only the average
+const dataThisNodeOnly = new Set<string>(); // mesh-util metrics showing only this node's series
 
 // Which node the Data pane is scoped to. LOCAL_NODE means the device we're
 // connected to / whose log this is (the default, and the only scope that has
@@ -47,7 +48,7 @@ function restingCaption(): string {
 
 export function refreshSummary(s: Session): void {
   if (!dom.summaryEl || s !== active) return;
-  const html = renderSummary(s.showAllBoots ? s.cumulative : s.summary);
+  const html = renderSummary(s.showAllBoots ? s.cumulative : s.summary, s.summary, s.cumulative);
   dom.summaryEl.innerHTML = html || restingCaption();
 }
 
@@ -152,6 +153,7 @@ function renderPeerNodeTiles(sum: DeviceSummary, nodeId: string): string {
 
 function renderLocalNodeTiles(s: Session, sum: DeviceSummary): string {
   const statusHtml = plot('nodeStatus', renderNodeStatusTile(sum));
+  const positionHtml = plot('position', renderPositionMap(sum));
   const nodeCountHtml = plot('nodeCount', renderNodeCountChart(sum));
   const hopHtml = plot('hop', renderHopChart(sum));
   const chanHtml = plot('channelHash', renderChannelHashChart(sum, dataLogScale.has('channelHash')));
@@ -168,7 +170,7 @@ function renderLocalNodeTiles(s: Session, sum: DeviceSummary): string {
       large: dom.workspaceEl.classList.contains('analysis'),
     };
     const rows = parseSensorLog(s.lineHistory.join('\n'));
-    meshUtilHtml = renderMultiNodeUtilCharts(rows, opts, dataAvgOnly)
+    meshUtilHtml = renderMultiNodeUtilCharts(rows, opts, dataAvgOnly, dataThisNodeOnly)
         .map(({key, html}) => plot(key, html)).join('');
     telHtml = renderTelemetryCharts(toSeries(rows), opts);
   }
@@ -176,7 +178,7 @@ function renderLocalNodeTiles(s: Session, sum: DeviceSummary): string {
   // masonry layout can pack each by its own height instead of leaving a gap
   // shaped like the tallest channel next to every shorter one.
   const nodesHtml = renderSeenNodesTable(sum).map(({key, html}) => plot(key, html)).join('');
-  return statusHtml + nodeCountHtml + hopHtml + chanHtml + meshUtilHtml + nodesHtml + telHtml;
+  return statusHtml + positionHtml + nodeCountHtml + hopHtml + chanHtml + meshUtilHtml + nodesHtml + telHtml;
 }
 
 export function refreshDataPlot(s: Session): void {
@@ -232,6 +234,12 @@ export function initDataControls(): void {
       if (key === undefined) return;
       if ((t as HTMLInputElement).checked) dataAvgOnly.add(key);
       else dataAvgOnly.delete(key);
+      refreshDataPlot(active);
+    } else if (t.classList.contains('dp-thisnode')) {
+      const key = t.dataset['key'];
+      if (key === undefined) return;
+      if ((t as HTMLInputElement).checked) dataThisNodeOnly.add(key);
+      else dataThisNodeOnly.delete(key);
       refreshDataPlot(active);
     } else if (t.id === 'dp_node_select') {
       dataNodeFilter = (t as HTMLSelectElement).value;

@@ -85,7 +85,10 @@ export function renderDiagnosis(s: DeviceSummary): string {
   // (3) Radio BUSY line stuck — TX-hang reboot loop. Signature: init succeeded, packets were
   // enqueued, but none ever keyed up, and the device rebooted repeatedly. Every SPI command
   // waits for BUSY to go low first; a broken BUSY wedges that wait until the watchdog resets.
-  if (s.radioInitSucceeded && s.boots >= 2 && s.txEnqueued > 0 && s.txCompleted === 0) {
+  // Requires >=2 enqueues (not just 1): a single enqueue-with-no-completion is exactly what a
+  // capture cut off right after the last reboot would also look like, so one enqueue alone
+  // isn't enough to tell a real BUSY hang apart from the log simply having ended.
+  if (s.radioInitSucceeded && s.boots >= 2 && s.txEnqueued >= 2 && s.txCompleted === 0) {
     diag.push({
       title: 'Radio BUSY line stuck — device reboot-loops on first transmit',
       detail:
@@ -400,7 +403,9 @@ export function renderDiagnosis(s: DeviceSummary): string {
             'move device outside with clear sky (GPS cold start needs ~30 s with 6+ sats in view).'
           : 'Check antenna connection and sky view. Cold-start TTFF: 27–45 s (NEO-6M), ~30 s (L76K) in good conditions.';
       warn.push({
-        title: `GPS hardware (${s.gpsChipModel}) detected but never obtained a fix`,
+        // "in this capture", not "never" — a log that ends mid-search hasn't
+        // ruled out a fix arriving moments after the capture stopped.
+        title: `GPS hardware (${s.gpsChipModel}) detected but no fix in this capture`,
         detail: `${s.gpsSearchFailures} failed search${s.gpsSearchFailures !== 1 ? 'es' : ''}. ` + hint,
       });
     }

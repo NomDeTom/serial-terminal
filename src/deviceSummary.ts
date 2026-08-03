@@ -190,6 +190,12 @@ export interface DeviceSummary {
   logLines: number;
   logDurationSecs: number;  // summed forward-going uptime deltas — see the matcher
   _logPrevUptime?: number;
+  // Whether the very first line ever processed was itself an S:B boot banner.
+  // True on a clean capture (starts at boot); false when capture began mid-boot
+  // cycle, which changes whether the first S:B line seen afterward is "the boot
+  // into capture" (don't count as a reboot) or a genuine reboot (do count it) —
+  // see the "Reboots (in log)" row in summaryRenderer.ts.
+  _firstLineWasBoot?: boolean;
 
   // Per-node aggregated stats for nodes heard over the air this session.
   seenNodes: Record<string, NodeStats>;
