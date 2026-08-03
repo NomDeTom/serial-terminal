@@ -184,6 +184,13 @@ export interface DeviceSummary {
   // All packet ids seen this boot — used to detect relay-echo duplicates.
   _seenPacketIds: Set<string>;
 
+  // Size of the log itself (not of the device state it describes). Scoped like
+  // everything else here: the per-boot summary is wiped on reboot so these cover
+  // the current boot, while the cumulative copy spans the whole capture.
+  logLines: number;
+  logDurationSecs: number;  // summed forward-going uptime deltas — see the matcher
+  _logPrevUptime?: number;
+
   // Per-node aggregated stats for nodes heard over the air this session.
   seenNodes: Record<string, NodeStats>;
 
@@ -442,6 +449,7 @@ export function emptySummary(): DeviceSummary {
     rxChannelHashCounts: {}, decodedChannelHashCounts: {}, txChannelHashCounts: {},
     dupChannelHashCounts: {},
     _rxHashById: {}, _seenPacketIds: new Set(),
+    logLines: 0, logDurationSecs: 0,
     seenNodes: {},
     nodeCountHistory: [],
     tracerouteHopSnrs: [],

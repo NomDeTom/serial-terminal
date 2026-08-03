@@ -348,6 +348,210 @@ function telLine(series: SensorSeries, opts: ChartOptions): string {
     `${svg}</div>`;
 }
 
+// ── Multi-node utilisation charts ───────────────────────────────────────────
+// Airtime and channel utilisation reported by *every* node that got data to us
+// — the local device via "Send:" lines, peers via "(Received from X):" lines —
+// layered on one set of axes, with a mesh-wide average overlaid.
+//
+// The x-axis is the local log's uptime for every source (parseLog stamps rows
+// from the line prefix, i.e. when *we* saw it), so peers with unsynchronised
+// clocks or their own uptimes still land on a common timeline for free.
+
+const UTIL_METRICS: Array<{metric: string; label: string}> = [
+  {metric: 'air_util_tx', label: 'Air util TX · all nodes'},
+  {metric: 'channel_utilization', label: 'Channel utilisation · all nodes'},
+];
+
+// Distinct enough to tell apart as thin overlaid lines; local always takes the
+// Meshtastic green, peers take the rest in a stable (sorted) order.
+const NODE_PALETTE = [
+  '#38bdf8', '#a78bfa', '#f59e0b', '#ff7b72',
+  '#39c5cf', '#d29922', '#79c0ff', '#c084fc',
+];
+const LOCAL_COLOR = '#67EA94';
+const AVG_COLOR = '#f3f4f6';
+
+interface UtilPoint { boot: number; uptime: number; value: number }
+
+// Mesh-wide average across nodes that report at different times and rates.
+//
+// A plain mean of the raw samples would over-weight whichever node happens to
+// report most often. Instead each node's last reading is carried forward
+// (last-observation-carried-forward), and at every instant a sample arrives the
+// mean is taken over all nodes heard from so far — so every node counts once,
+// regardless of how chatty it is. Carry-forward is reset per boot, since a
+// reading from before a reboot says nothing about the mesh after it.
+function averageAcrossNodes(bySource: Map<string, UtilPoint[]>): UtilPoint[] {
+  const all: Array<{src: string; p: UtilPoint}> = [];
+  for (const [src, pts] of bySource) for (const p of pts) all.push({src, p});
+  all.sort((a, b) => a.p.boot - b.p.boot || a.p.uptime - b.p.uptime);
+
+  const out: UtilPoint[] = [];
+  let curBoot = -1;
+  let latest = new Map<string, number>();
+  let i = 0;
+  while (i < all.length) {
+    const boot = all[i].p.boot;
+    if (boot !== curBoot) {
+      curBoot = boot;
+      latest = new Map();
+    }
+    // Fold in every sample sharing this exact timestamp before averaging, so
+    // simultaneous reports produce one averaged point rather than several.
+    const t = all[i].p.uptime;
+    while (i < all.length && all[i].p.boot === boot && all[i].p.uptime === t) {
+      latest.set(all[i].src, all[i].p.value);
+      i++;
+    }
+    let sum = 0;
+    for (const v of latest.values()) sum += v;
+    out.push({boot, uptime: t, value: sum / latest.size});
+  }
+  return out;
+}
+
+function polylineFor(
+    pts: UtilPoint[], X: (u: number) => number, Y: (v: number) => number,
+    color: string, width: number, dashed = false): string {
+  // One polyline per boot run, so a reboot leaves a gap instead of a line
+  // sweeping back across the chart. A run of a single sample can't be a line —
+  // distant peers often report just once — so it's drawn as a dot instead,
+  // otherwise that node would sit in the legend with nothing visible on the
+  // chart (and it does still pull on the average from that point on).
+  const out: string[] = [];
+  let si = 0;
+  while (si < pts.length) {
+    const boot = pts[si].boot;
+    let ei = si + 1;
+    while (ei < pts.length && pts[ei].boot === boot) ei++;
+    if (ei - si === 1) {
+      out.push(`<circle cx="${X(pts[si].uptime).toFixed(1)}" cy="${Y(pts[si].value).toFixed(1)}" ` +
+        `r="${(width + 1).toFixed(1)}" fill="${color}"/>`);
+    } else {
+      const coords: string[] = [];
+      for (let j = si; j < ei; j++) {
+        coords.push(`${X(pts[j].uptime).toFixed(1)},${Y(pts[j].value).toFixed(1)}`);
+      }
+      const dash = dashed ? ' stroke-dasharray="4 2"' : '';
+      out.push(`<polyline points="${coords.join(' ')}" fill="none" stroke="${color}" ` +
+        `stroke-width="${width}"${dash} stroke-linejoin="round"/>`);
+    }
+    si = ei;
+  }
+  return out.join('');
+}
+
+function utilChart(
+    metric: string, label: string, rows: SensorRow[],
+    opts: ChartOptions, averageOnly: boolean): string {
+  const mine = rows.filter((r) => normMetric(r.metric) === metric);
+  if (mine.length === 0) return '';
+
+  const bySource = new Map<string, UtilPoint[]>();
+  for (const r of mine) {
+    if (!bySource.has(r.source)) bySource.set(r.source, []);
+    bySource.get(r.source)!.push({boot: r.boot, uptime: r.uptime, value: r.value});
+  }
+  for (const pts of bySource.values()) {
+    pts.sort((a, b) => a.boot - b.boot || a.uptime - b.uptime);
+  }
+  // With a single source this is just the existing per-node chart with extra
+  // steps — these tiles only earn their space once there's a mesh to compare.
+  if (bySource.size < 2) return '';
+
+  const avg = averageAcrossNodes(bySource);
+
+  const W = opts.large ? 300 : 290;
+  const H = opts.large ? 200 : 110;
+  const pL = 28; const pB = 18; const pT = 5; const pR = 6;
+  const cW = W - pL - pR;
+  const cH = H - pT - pB;
+
+  let xMin = Infinity; let xMax = -Infinity; let yMax = -Infinity;
+  for (const r of mine) {
+    if (r.uptime < xMin) xMin = r.uptime;
+    if (r.uptime > xMax) xMax = r.uptime;
+    if (r.value > yMax) yMax = r.value;
+  }
+  if (xMin === xMax) xMax = xMin + 1;
+  // Utilisation is a non-negative percentage, so the axis is pinned at 0 rather
+  // than auto-fitting the minimum — a floor of 0 keeps "how loaded is the mesh"
+  // readable instead of magnifying noise.
+  const yMinV = 0;
+  const yMaxV = yMax > 0 ? yMax * 1.1 : 1;
+  const xR = xMax - xMin;
+  const yR = yMaxV - yMinV;
+  const X = (u: number): number => pL + ((u - xMin) / xR) * cW;
+  const Y = (v: number): number => {
+    const y = pT + cH - ((v - yMinV) / yR) * cH;
+    return Math.max(pT, Math.min(pT + cH, y));
+  };
+
+  const out: string[] = [];
+  for (let t = 0; t <= 3; t++) {
+    const v = yMinV + (t / 3) * yR;
+    const y = Y(v);
+    out.push(`<line x1="${pL}" x2="${(pL + cW).toFixed(1)}" ` +
+      `y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#374151" stroke-width="0.5"/>`);
+    out.push(`<text x="${(pL - 3).toFixed(1)}" y="${(y + 3).toFixed(1)}" ` +
+      `text-anchor="end" font-size="7" fill="#6b7280">${fmtV(v)}</text>`);
+  }
+
+  // Peers in stable alphabetical order so a node keeps its colour between renders.
+  const sources = [...bySource.keys()].sort((a, b) => {
+    if (a === 'local') return -1;
+    if (b === 'local') return 1;
+    return a.localeCompare(b);
+  });
+  const colorOf = (src: string, idx: number): string =>
+    src === 'local' ? LOCAL_COLOR : NODE_PALETTE[(idx - 1 + NODE_PALETTE.length) % NODE_PALETTE.length];
+
+  if (!averageOnly) {
+    sources.forEach((src, idx) => {
+      out.push(polylineFor(bySource.get(src)!, X, Y, colorOf(src, idx), 1));
+    });
+  }
+  out.push(polylineFor(avg, X, Y, AVG_COLOR, averageOnly ? 1.8 : 2, true));
+
+  const ly = (pT + cH + 12).toFixed(1);
+  for (let t = 0; t <= 4; t++) {
+    const u = xMin + (t / 4) * xR;
+    out.push(`<text x="${X(u).toFixed(1)}" y="${ly}" ` +
+      `text-anchor="middle" font-size="7" fill="#6b7280">${fmtU(u)}</text>`);
+  }
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    out.join('') + '</svg>';
+
+  const legendItems = [
+    `<span class="hc-dot" style="background:${AVG_COLOR}"></span>mesh avg (${sources.length})`,
+  ];
+  if (!averageOnly) {
+    sources.forEach((src, idx) => {
+      const name = src === 'local' ? 'this node' : src;
+      legendItems.push(`<span class="hc-dot" style="background:${colorOf(src, idx)}"></span>${name}`);
+    });
+  }
+  const legend = `<div class="hc-legend hc-legend-wrap">${legendItems.join('')}</div>`;
+  const toggle = `<label class="hc-range"><input type="checkbox" class="dp-avgonly" ` +
+    `data-key="${escapeAttr(metric)}"${averageOnly ? ' checked' : ''}>avg only</label>`;
+  return `<div class="hc-section">` +
+    `<div class="hc-head"><span class="hc-label">${label}</span>${toggle}</div>` +
+    `${svg}${legend}</div>`;
+}
+
+// One tile per utilisation metric, keyed for the masonry layout.
+export function renderMultiNodeUtilCharts(
+    rows: SensorRow[], opts: ChartOptions,
+    averageOnly: Set<string>): Array<{key: string; html: string}> {
+  const out: Array<{key: string; html: string}> = [];
+  for (const {metric, label} of UTIL_METRICS) {
+    const html = utilChart(metric, label, rows, opts, averageOnly.has(metric));
+    if (html) out.push({key: `meshUtil:${metric}`, html});
+  }
+  return out;
+}
+
 export function renderTelemetryCharts(series: SensorSeries[], opts: ChartOptions): string {
   // uptime is a monotonic counter — shown as a clock in the summary, not plotted.
   let usable = series.filter((s) => s.points.length >= 2 && s.metric.toLowerCase() !== 'uptime');

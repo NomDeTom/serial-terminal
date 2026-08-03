@@ -1,6 +1,7 @@
 import {DeviceSummary, emptySummary} from './deviceSummary';
 import {lookupDevice, lookupDeviceByModel} from './deviceInfo';
 import {feedMultiLine} from './multiLineMatch';
+import {parseLine} from './logParser';
 
 // The channel *index* (0-7) is printed on "decoded message" lines. printPacket()
 // historically renders it as hex with a redundant prefix ("Ch=0x0%x" → "Ch=0x5");
@@ -1666,6 +1667,24 @@ const MATCHERS: Array<(line: string, s: DeviceSummary) => void> = [
     s.numOnlineNodes = Number(m[1]);
     s.numTotalNodes = Number(m[2]);
     recordNodeCount(s, s.numOnlineNodes, s.numTotalNodes);
+  },
+
+  // Log length — how much log this summary was built from.
+  //
+  // Duration accumulates forward-going uptime deltas rather than taking
+  // last-minus-first, because the cumulative summary spans reboots and uptime
+  // restarts at 0 each time; a backwards step is a reboot boundary, so it
+  // contributes nothing instead of going negative. On the per-boot summary
+  // (wiped on every S:B: line) the same arithmetic reduces to last-minus-first.
+  // Lines without an uptime stamp (bootloader spew, other log formats) still
+  // count toward logLines but can't move the clock.
+  (line, s) => {
+    s.logLines++;
+    const {uptime} = parseLine(line);
+    if (uptime === undefined || !Number.isFinite(uptime)) return;
+    const prev = s._logPrevUptime;
+    if (prev !== undefined && uptime >= prev) s.logDurationSecs += uptime - prev;
+    s._logPrevUptime = uptime;
   },
 ];
 

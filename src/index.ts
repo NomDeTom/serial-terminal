@@ -21,6 +21,7 @@ import {switchView, clearLog, toggleTeleplotFocus} from './viewController';
 import {initSerial} from './serialSource';
 import {initFile} from './fileSource';
 import {initInteractiveControls} from './interactiveSerial';
+import {initMobileLayout} from './mobileLayout';
 
 document.addEventListener('DOMContentLoaded', async () => {
   initDeviceInfo();
@@ -249,4 +250,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   switchView('serial');
   initSerial();
+  // Last: relocates control bars into mobile sheets, so every listener bound
+  // above is already attached to the elements it moves.
+  initMobileLayout();
 });

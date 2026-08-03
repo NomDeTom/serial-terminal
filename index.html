@@ -796,6 +796,58 @@
       gap: 4px;
     }
     .dp-controls input { cursor: pointer; accent-color: var(--green); }
+
+    /* Node scope chips (Data pane). The row never wraps — when the chips don't
+       fit, statsView.ts adds .collapsed, which hides every peer chip and reveals
+       the <select> instead, leaving only "This node" inline. */
+    .dp-nodes {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: nowrap;
+      overflow: hidden;
+      min-width: 0;
+      /* Wraps onto its own full-width line once the suppress-zero checkbox
+         leaves it less than ~220px, rather than being squeezed beside it. */
+      flex: 1 1 220px;
+    }
+    .dp-node-chip {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: monospace;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .dp-node-chip:hover { color: var(--text); border-color: var(--text); }
+    .dp-node-chip.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+    .dp-node-id, .dp-node-n { opacity: 0.65; font-weight: 400; }
+    .dp-node-select {
+      font-size: 11px;
+      font-family: monospace;
+      padding: 3px 6px;
+      max-width: 190px;
+      min-width: 0;
+      display: none;      /* only shown once the chip row overflows */
+      flex: 0 1 auto;     /* may shrink — a narrow sidebar can't spare 190px */
+    }
+    .dp-nodes.collapsed .dp-node-chip:not([data-node="__local__"]) { display: none; }
+    .dp-nodes.collapsed .dp-node-select { display: inline-block; }
+    /* Collapsed means space is already tight: drop the local node's id suffix and
+       let the remaining chip ellipsise rather than pushing the select out of view. */
+    .dp-nodes.collapsed .dp-node-id { display: none; }
+    .dp-nodes.collapsed .dp-node-chip {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .dp-charts {
       display: flex;
       gap: 16px;
@@ -952,6 +1004,11 @@
       height: 8px;
       border-radius: 2px;
     }
+    /* Mesh-util legends list one entry per node, so they need to wrap rather
+       than run off the tile. The gap replaces the per-dot margin the
+       fixed-legend charts use inline. */
+    .hc-legend-wrap { flex-wrap: wrap; gap: 3px 9px; line-height: 1.5; }
+    .hc-legend-wrap .hc-dot { margin-right: 3px; }
     /* Node-status text tile */
     .ns-tile { display: flex; flex-direction: column; gap: 3px; min-width: 160px; }
     /* Seen-nodes table (data tab + analysis mode) */
@@ -1018,7 +1075,53 @@
     .mobile-tab:hover { color: var(--text); }
     .mobile-tab.active { background: var(--green-bg); color: var(--green); border-color: var(--green); }
 
+    /* Mobile search bar (row 3) + bottom sheets. Hidden on desktop, where the
+       controls they host live inline in the mode-bar / filter-bar instead. */
+    .mobile-search-bar { display: none; }
+    .mobile-only-btn { display: none; }
+    .sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 24, 39, 0.7);
+      z-index: 90;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+    .sheet-backdrop.active { opacity: 1; pointer-events: auto; }
+    .sheet {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      max-height: 80vh;
+      display: none;
+      flex-direction: column;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 -8px 32px rgba(0,0,0,0.45);
+      z-index: 95;
+      transform: translateY(100%);
+      transition: transform 0.18s ease-out;
+    }
+    .sheet.open { transform: translateY(0); }
+    .sheet-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sheet-title { font-size: 12px; font-weight: 700; letter-spacing: 0.05em; color: var(--green); }
+    .sheet-close {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 15px; padding: 4px 8px; line-height: 1;
+    }
+    .sheet-close:hover { color: var(--text); }
+    .sheet-body { overflow-y: auto; padding: 12px 14px 20px; -webkit-overflow-scrolling: touch; }
+
     @media (max-width: 720px), (pointer: coarse) and (max-width: 900px) {
+      /* ── Panes: one full-screen tab at a time ── */
       .mobile-tabbar { display: flex; }
       /* .boot-toggle stays — it's a scope switch (since-boot vs all-logs), not
          a tab, and still applies no matter which mobile pane is showing. */
@@ -1034,7 +1137,79 @@
       .panel-edge { display: none; }         /* desktop-only: resizing/hiding a sidebar beside a terminal */
       body:not(.mobile-pane-log) .term-wrap { display: none; }
       body.mobile-pane-log #info_panel { display: none; }
-      .log-search { width: auto; flex: 1 1 80px; min-width: 60px; }
+
+      /* ── App bar: one row, never wraps ── */
+      .toolbar { flex-wrap: nowrap; gap: 6px; padding: 6px 8px; }
+      .title-sub { display: none; }               /* "Log Analyser" — the title alone is enough */
+      #teleplot_toggle { display: none; }         /* redundant with the Tele pane tab */
+      #credits_btn { display: none; }             /* reachable from the actions sheet */
+      .toolbar .sep { display: none; }
+      .toolbar-right { gap: 4px; }
+      .mobile-only-btn { display: inline-flex; align-items: center; font-size: 14px; padding: 4px 9px; }
+      .view-tab-big { font-size: 12px; font-weight: 600; padding: 5px 9px; border-radius: 5px; }
+
+      /* ── Search bar (row 3): only meaningful over the log ── */
+      .mobile-search-bar {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 8px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      body:not(.mobile-pane-log) .mobile-search-bar { display: none; }
+      .mobile-search-bar #search_group { display: contents; }
+      .mobile-search-bar .filter-label { display: none; }  /* the placeholder already says "Search logs…" */
+      .mobile-search-bar .log-search { width: auto; flex: 1 1 120px; min-width: 0; }
+      /* Reserving 42px for a count that's empty until you search wastes width
+         that the input needs far more. */
+      .mobile-search-bar .search-count { min-width: 0; }
+      .mobile-search-bar .search-nav-btn { padding: 3px 5px; flex-shrink: 0; }
+      /* Text labels ("Filter", "Highlight", "⌨️ Interactive") don't fit next to a
+         usable search field at 360px — collapse each to its glyph. They keep
+         their ids, titles and active-state colours, so behaviour is unchanged. */
+      .mobile-search-bar #search_filter,
+      .mobile-search-bar #highlight_lines,
+      .mobile-search-bar #interactive_toggle {
+        font-size: 0;
+        padding: 4px 7px;
+        border-radius: 5px;
+        flex-shrink: 0;
+      }
+      .mobile-search-bar #search_filter::before { content: '⧉'; font-size: 13px; }
+      .mobile-search-bar #highlight_lines::before { content: '🖍'; font-size: 12px; }
+      .mobile-search-bar #interactive_toggle::before { content: '⌨'; font-size: 14px; }
+
+      /* ── Sheets: host the relocated mode-bar / port-bar / filter-bar ── */
+      .sheet { display: flex; }
+      .sheet .mode-bar,
+      .sheet .port-bar,
+      .sheet .filter-bar {
+        background: transparent;
+        border: none;
+        padding: 0;
+        row-gap: 8px;
+        column-gap: 8px;
+      }
+      .sheet .ctrl-group { flex-wrap: wrap; row-gap: 8px; }
+      /* Desktop pushes the log actions to the far right; in a sheet they just flow. */
+      .sheet #log_actions_group { margin-left: 0 !important; flex-wrap: wrap; row-gap: 8px; }
+      .sheet .api-toggle { margin-left: 0; }
+      .sheet #serial_controls { flex: initial; }
+      .sheet .sep { display: none; }
+      .sheet .filter-label { width: 100%; }        /* LEVEL / MODULE act as section headings */
+      .sheet .module-overflow { flex-wrap: wrap; }
+      .sheet #log_label { width: 100px; }
+      .sheet .pii-eg { display: none; }            /* the example coords are noise on a narrow sheet */
+
+      /* ── Footer: its link list wraps into a jumble and overlaps the workspace;
+             the same credits + licence live in the Credits overlay, reachable
+             from the actions sheet. `body > footer` (not bare `footer`) because
+             the base footer rule is declared after this block — equal
+             specificity would let source order win. ── */
+      body { padding-bottom: 0; }
+      body > footer { display: none; }
     }
 
     /* ── Footer ── */
@@ -1071,6 +1246,10 @@
     <button class="view-tab view-tab-big" id="teleplot_toggle" title="Focus the sidebar on Teleplot charts only">📈 Teleplot</button>
     <button class="view-tab view-tab-big" id="interactive_toggle" title="Send data to the device over the open serial port">⌨️ Interactive</button>
     <div class="toolbar-right">
+      <!-- Mobile-only sheet triggers; the controls they reveal are the very same
+           .mode-bar / .filter-bar elements, relocated by mobileLayout.ts. -->
+      <button id="sheet_setup_btn" class="btn mobile-only-btn" title="Connection &amp; port setup">🔌</button>
+      <button id="sheet_actions_btn" class="btn mobile-only-btn" title="Filters, log actions &amp; more">⋮</button>
       <button id="credits_btn" class="btn" title="Credits">ℹ️ Credits</button>
     </div>
   </div>
@@ -1176,17 +1355,21 @@
       <button id="teleplot_hide_data" class="btn" title="Hide &gt;name:value Teleplot lines from the log view (still included when you Save)">🙈 Hide Data</button>
       <div class="sep"></div>
     </span>
-    <span class="filter-label">SEARCH</span>
-    <input id="log_search" class="log-search" type="search" placeholder="Search logs…" autocomplete="off" spellcheck="false">
-    <button id="search_prev" class="search-nav-btn" title="Previous match (Shift+Enter)">▲</button>
-    <button id="search_next" class="search-nav-btn" title="Next match (Enter)">▼</button>
-    <button id="search_clear" class="search-nav-btn" title="Clear search">✕</button>
-    <span id="search_count" class="search-count"></span>
-    <button id="search_filter" class="search-filter-btn" title="Show only lines matching the search">Filter</button>
-    <button id="highlight_lines" class="search-filter-btn" title="Highlight full lines matching the search">Highlight</button>
+    <!-- display:contents, so on desktop this wrapper is layout-neutral; on mobile
+         mobileLayout.ts relocates it wholesale into the always-visible search bar. -->
+    <span id="search_group" class="fb-group">
+      <span class="filter-label">SEARCH</span>
+      <input id="log_search" class="log-search" type="search" placeholder="Search logs…" autocomplete="off" spellcheck="false">
+      <button id="search_prev" class="search-nav-btn" title="Previous match (Shift+Enter)">▲</button>
+      <button id="search_next" class="search-nav-btn" title="Next match (Enter)">▼</button>
+      <button id="search_clear" class="search-nav-btn" title="Clear search">✕</button>
+      <span id="search_count" class="search-count"></span>
+      <button id="search_filter" class="search-filter-btn" title="Show only lines matching the search">Filter</button>
+      <button id="highlight_lines" class="search-filter-btn" title="Highlight full lines matching the search">Highlight</button>
+    </span>
     <div class="sep"></div>
     <button id="pii_toggle" class="btn" title="Redact node IDs, GPS coords and node names">🔒 PII: OFF <span class="pii-eg">lat=52.944 lon=-1.435</span></button>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+    <div id="log_actions_group" style="margin-left:auto;display:flex;align-items:center;gap:8px">
       <button id="autoscroll" class="btn btn-active" title="Auto-scroll the log to the newest line">⤓ Autoscroll</button>
       <button id="static_scroll" class="btn btn-active" title="Hold the view still while lines arrive in a burst, then settle once the burst pauses — avoids jerky scrolling when entries come in regular lumps">▦ Static Scroll</button>
       <button id="jump_bottom" class="btn" title="Jump to the newest line">⮟ Bottom</button>
@@ -1211,6 +1394,11 @@
     <button class="mobile-tab" data-panel="diagnosis">Diag</button>
     <button class="mobile-tab" data-panel="teleplot">Tele</button>
   </div>
+
+  <!-- Mobile-only: search is high-frequency enough to stay on screen rather than
+       live in a sheet. Populated by mobileLayout.ts relocating #search_group and
+       #interactive_toggle here. Only shown while the Log pane is active. -->
+  <div class="mobile-search-bar" id="mobile_search_bar"></div>
 
   <!-- ── Workspace: terminal + info sidebar (side by side, terminal never resizes vertically) ── -->
   <div class="workspace">
@@ -1288,6 +1476,29 @@
     Shared under the
     <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL-3.0 licence</a>.
   </footer>
+
+  <!-- ── Mobile bottom sheets ──
+       These are empty shells; mobileLayout.ts moves the real .mode-bar /
+       .port-bar / .filter-bar elements into them below the breakpoint and puts
+       them back on the way out, so there is exactly one copy of every control
+       and every existing event listener keeps working. -->
+  <div class="sheet-backdrop" id="sheet_backdrop"></div>
+  <div class="sheet" id="sheet_setup">
+    <div class="sheet-head">
+      <!-- ".mode-bar" swaps between serial controls and the file picker with the
+           active view, so this sheet is the source/connection setup for either. -->
+      <span class="sheet-title">Setup</span>
+      <button class="sheet-close" data-sheet-close aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body" id="sheet_setup_body"></div>
+  </div>
+  <div class="sheet" id="sheet_actions">
+    <div class="sheet-head">
+      <span class="sheet-title">Filters &amp; actions</span>
+      <button class="sheet-close" data-sheet-close aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body" id="sheet_actions_body"></div>
+  </div>
 
   <!-- ── Credits overlay ── -->
   <div id="credits_overlay" class="credits-overlay">

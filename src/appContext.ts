@@ -96,6 +96,11 @@ export interface Dom {
   interactiveInputEl: HTMLInputElement;
   interactiveNewlineCheckbox: HTMLInputElement;
   interactiveSendBtn: HTMLButtonElement;
+  // Mobile layout: sheet triggers + backdrop (see mobileLayout.ts)
+  creditsBtn: HTMLButtonElement;
+  sheetSetupBtn: HTMLButtonElement;
+  sheetActionsBtn: HTMLButtonElement;
+  sheetBackdropEl: HTMLElement;
   // Toolbar toggles
   bootSinceBtn: HTMLButtonElement;
   bootAllBtn: HTMLButtonElement;
@@ -156,6 +161,10 @@ export function initDom(): void {
   dom.interactiveInputEl = document.getElementById('interactive_input') as HTMLInputElement;
   dom.interactiveNewlineCheckbox = document.getElementById('interactive_newline') as HTMLInputElement;
   dom.interactiveSendBtn = document.getElementById('interactive_send') as HTMLButtonElement;
+  dom.creditsBtn = document.getElementById('credits_btn') as HTMLButtonElement;
+  dom.sheetSetupBtn = document.getElementById('sheet_setup_btn') as HTMLButtonElement;
+  dom.sheetActionsBtn = document.getElementById('sheet_actions_btn') as HTMLButtonElement;
+  dom.sheetBackdropEl = document.getElementById('sheet_backdrop')!;
   dom.bootSinceBtn = document.getElementById('boot_since') as HTMLButtonElement;
   dom.bootAllBtn = document.getElementById('boot_all') as HTMLButtonElement;
   dom.autoscrollBtn = document.getElementById('autoscroll') as HTMLButtonElement;
@@ -193,4 +202,10 @@ const mobileLayoutQuery = window.matchMedia(
 );
 export function isMobileLayout(): boolean {
   return mobileLayoutQuery.matches;
+}
+
+// Fires on rotation, window resize across the breakpoint, and devtools device
+// emulation — mobileLayout.ts uses it to relocate controls in/out of sheets.
+export function onMobileLayoutChange(fn: (mobile: boolean) => void): void {
+  mobileLayoutQuery.addEventListener('change', (e) => fn(e.matches));
 }

@@ -65,6 +65,9 @@ const NON_EVENT_FIELDS = new Set<keyof DeviceSummary>([
   'lastSnr', 'freqOffset',
   // boot info (descriptive)
   'rebootCount', 'wakeSource', 'bootCount', 'resetReason', 'espRstCode', 'resetReasonCode',
+  // size of the log itself — present for any input at all, so it must never on
+  // its own make a summary look like it "has events"
+  'logLines', 'logDurationSecs',
   // packet stats / telemetry / normal traffic & history
   'txGood', 'txRelay', 'rxGood', 'rxBad', 'uptime', 'numPacketsTx', 'numPacketsRx',
   'numPacketsRxBad', 'airUtilTx', 'channelUtil', 'numOnlineNodes', 'numTotalNodes',
@@ -115,6 +118,13 @@ export function renderSummary(s: DeviceSummary): string {
   if (!s.hardware && !s.firmware && !s.radioType && !hasEvents) return '';
 
   const rows: Array<[string, string, string?]> = [];
+
+  if (s.logLines > 0) {
+    const dur = s.logDurationSecs > 0 ? ` · ${fmtUptime(s.logDurationSecs)}` : '';
+    rows.push(['Log length', `${s.logLines.toLocaleString()} lines${dur}`,
+      'Lines parsed into this summary, and the time they span according to the ' +
+      'log\'s own uptime stamps (gaps across reboots excluded)']);
+  }
 
   if (s.nodeName) rows.push(['Name', s.nodeName]);
   if (s.nodeId) rows.push(['Node ID', `<code>${s.nodeId}</code>`]);
@@ -1384,14 +1394,118 @@ function hopLineChart(data: number[]): string {
   return `<div class="hc-section"><div class="hc-label">Scaled seen / hour</div>${svg}</div>`;
 }
 
+// ── Per-node detail tiles (Data tab, when a peer node is selected) ────────────
+
+// Headline stats for one heard node — the peer-node counterpart to
+// renderNodeStatusTile (which covers the local device).
+export function renderNodeDetailTile(s: DeviceSummary, nodeId: string): string {
+  const ns = s.seenNodes[nodeId];
+  if (!ns) return '';
+  const rows: Array<[string, string]> = [];
+  rows.push(['Heard', String(ns.heard)]);
+  if (ns.decoded > 0) rows.push(['Decoded', String(ns.decoded)]);
+  if (ns.dup > 0) rows.push(['Duplicates', String(ns.dup)]);
+  if (ns.hopCount > 0) {
+    const avg = (ns.hopSum / ns.hopCount).toFixed(1);
+    const min = isFinite(ns.hopMin) ? ns.hopMin : '—';
+    const direct = ns.hopMin === 0 ? ' <span class="sum-tag">direct</span>' : '';
+    rows.push(['Hops', `avg ${avg} · min ${min}${direct}`]);
+  }
+  if (ns.lastRssi !== undefined) {
+    const snr = ns.lastSnr !== undefined ? ` · SNR ${ns.lastSnr.toFixed(1)} dB` : '';
+    rows.push(['Signal', `RSSI ${ns.lastRssi} dBm${snr}`]);
+  }
+  if (ns.lastChannelIndex !== undefined) rows.push(['Channel slot', String(ns.lastChannelIndex)]);
+  const chanCount = Object.keys(ns.channels).length;
+  if (chanCount > 0) rows.push(['Channels', `${chanCount} hash${chanCount === 1 ? '' : 'es'}`]);
+  const body = rows.map(([k, v]) =>
+    `<div class="ns-row"><span class="ns-k">${k}</span><span class="ns-v">${v}</span></div>`,
+  ).join('');
+  return `<div class="hc-section"><div class="hc-label">Node ${nodeId}</div>` +
+    `<div class="ns-tile">${body}</div></div>`;
+}
+
+// Heard-count per channel hash for a single node. The global channel-hash chart
+// aggregates every node, so it can't answer "which channels is *this* node on".
+export function renderNodeChannelChart(
+    s: DeviceSummary, nodeId: string, logScale = false): string {
+  const ns = s.seenNodes[nodeId];
+  if (!ns) return '';
+  const hashes = Object.keys(ns.channels)
+      .filter((h) => (ns.channels[h] ?? 0) > 0)
+      .sort((a, b) => Number(a) - Number(b));
+  if (hashes.length === 0) return '';
+
+  const W = 290; const H = 110;
+  const pL = 22; const pB = 22; const pT = 8; const pR = 6;
+  const cW = W - pL - pR;
+  const cH = H - pT - pB;
+  const n = hashes.length;
+  const vals = hashes.map((h) => ns.channels[h] ?? 0);
+  const maxVal = Math.max(1, ...vals);
+  const scale = logScale ? 'log' : 'linear';
+  const groupW = cW / n;
+  const gap = Math.max(2, groupW * 0.3);
+  const barW = groupW - gap;
+  const parts: string[] = renderGridLines(pL, cW, pT, cH, maxVal, scale);
+
+  for (let i = 0; i < n; i++) {
+    const bx = pL + i * groupW + gap / 2;
+    const bh = valueToFrac(vals[i], maxVal, scale) * cH;
+    const g: string[] = [];
+    g.push(`<rect x="${(pL + i * groupW).toFixed(1)}" y="${pT}" ` +
+      `width="${groupW.toFixed(1)}" height="${cH}" fill="transparent"/>`);
+    if (bh > 0) {
+      g.push(`<rect x="${bx.toFixed(1)}" y="${(pT + cH - bh).toFixed(1)}" ` +
+        `width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="#67EA94" opacity="0.85" rx="1"/>`);
+    }
+    g.push(`<text x="${(bx + barW / 2).toFixed(1)}" y="${(pT + cH + 14).toFixed(1)}" ` +
+      `text-anchor="middle" font-size="8" fill="#6b7280">${hashes[i]}</text>`);
+    const hint = publicChannelHint(Number(hashes[i]));
+    const title = `Ch 0x${Number(hashes[i]).toString(16)} — ${vals[i]} heard from ${nodeId}` +
+      (hint ? `\nPossible public channels:\n${hint}` : '\n(no known public preset)');
+    parts.push(`<g><title>${xmlEscape(title)}</title>${g.join('')}</g>`);
+  }
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+    parts.join('') + `</svg>`;
+  const toggle = `<label class="hc-range"><input type="checkbox" class="dp-logscale" ` +
+    `data-key="nodeChannels"${logScale ? ' checked' : ''}>log scale</label>`;
+  return `<div class="hc-section">` +
+    `<div class="hc-head"><span class="hc-label">Packets heard per channel</span>${toggle}</div>` +
+    `${svg}</div>`;
+}
+
+// Telemetry this peer broadcast (battery, voltage, air util, …), if any reached us.
+export function renderPeerTelemetryTile(s: DeviceSummary, nodeId: string): string {
+  // Log senders aren't always formatted exactly like the nodeDB id, so fall
+  // back to a case-insensitive match before giving up.
+  const key = s.peerTelemetry[nodeId] ? nodeId :
+    Object.keys(s.peerTelemetry).find((k) => k.toLowerCase() === nodeId.toLowerCase());
+  const tm = key ? s.peerTelemetry[key] : undefined;
+  if (!tm) return '';
+  const entries = Object.entries(tm);
+  if (entries.length === 0) return '';
+  const body = entries.map(([k, v]) => {
+    const val = Number.isInteger(v) ? String(v) : v.toFixed(2);
+    return `<div class="ns-row"><span class="ns-k">${k}</span><span class="ns-v">${val}</span></div>`;
+  }).join('');
+  return `<div class="hc-section"><div class="hc-label">Telemetry received</div>` +
+    `<div class="ns-tile">${body}</div></div>`;
+}
+
 // Per-channel-hash node tables for the data tab.
 // One hc-section per channel hash, listing every node heard on that channel.
 // Each channel gets its own independent tile (rather than one tile containing
 // every channel's table stacked inside it) so the DATA tab's masonry layout
 // (masonryLayout.ts) can pack them by actual height instead of leaving a big
 // tile-shaped gap next to short ones.
-export function renderSeenNodesTable(s: DeviceSummary): Array<{key: string; html: string}> {
-  const entries = Object.entries(s.seenNodes);
+// `onlyNode` restricts the rows (and therefore which channels appear at all) to
+// a single node — used by the Data tab's node filter chips.
+export function renderSeenNodesTable(
+    s: DeviceSummary, onlyNode?: string): Array<{key: string; html: string}> {
+  const all = Object.entries(s.seenNodes);
+  const entries = onlyNode ? all.filter(([id]) => id === onlyNode) : all;
   if (entries.length === 0) return [];
 
   const allHashes = [...new Set(
