@@ -1,0 +1,56 @@
+name: Irate-Box app bundle (serial)
+
+# Builds the serial terminal (npm run build: a static Vite build, served at /serial/) for the Irate-Box hub and uploads it as a run artifact,
+# irate-box-serial-<commit>, which the hub's librarian can install (through nightly.link, or with
+# a GitHub token). No releases: this is a fork for testing. Built from this repository.
+# The bundle carries irate-box-bundle.json: which repository and commit it was built from.
+# Artifacts expire after 90 days, so this also runs monthly.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 5 1 * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: irate-box-bundle
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Record what was built
+        run: |
+          cat > "dist/irate-box-bundle.json" <<JSON
+          {"app": "serial", "repository": "${{ github.repository }}", "ref": "$(git rev-parse --abbrev-ref HEAD)",
+           "commit": "$(git rev-parse HEAD)", "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "run": ${{ github.run_id }}}
+          JSON
+          echo "SHORT=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+          du -sh "dist"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: irate-box-serial-${{ env.SHORT }}
+          path: dist
+          retention-days: 90
+          compression-level: 6
+          if-no-files-found: error
