@@ -38,6 +38,27 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Third-party notices
+        # THIRD-PARTY-NOTICES.txt in the bundle: what npm does not describe first, then every
+        # package installed under node_modules with its license text -- a superset of what the
+        # bundle contains, since bundlers also take from devDependencies.
+        run: |
+          out="dist/THIRD-PARTY-NOTICES.txt"
+          {
+            cat <<NOTICE
+          Meshtastic serial terminal and log analyser, GNU General Public License v3.0, built for the Irate-Box hub from ${{ github.repository }} at ${{ github.sha }}.
+          Source: https://github.com/${{ github.repository }}/tree/${{ github.sha }}
+
+          NOTICE
+            cat <<'NOTICE'
+          This program is free software: you can redistribute it and/or modify it under the terms
+          of the GNU General Public License, version 3 (LICENSE in the source above). The source
+          for this exact build is the commit named above.
+
+          NOTICE
+            node .github/scripts/irate-box-notices.mjs node_modules
+          } > "$out"
+          du -h "$out"
       - name: Record what was built
         run: |
           cat > "dist/irate-box-bundle.json" <<JSON
