@@ -1,6 +1,7 @@
 name: Irate-Box app bundle (serial)
 
-# Builds the serial terminal (npm run build: a static Vite build, served at /serial/) for the Irate-Box hub and uploads it as a run artifact,
+# Builds the serial terminal (npm run build: a static Vite build, served at /serial/) for the Irate-Box hub, plus
+# serial-terminal.html, the same app as one file to download for live USB, and uploads them as a run artifact,
 # irate-box-serial-<commit>, which the hub's librarian can install (through nightly.link, or with
 # a GitHub token). No releases: this is a fork for testing. Built from this repository.
 # The bundle carries irate-box-bundle.json: which repository and commit it was built from.
@@ -38,6 +39,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Single-file download (live USB serial from a file opened on the user's machine)
+        # Web Serial needs a secure context: a page opened from file:// is one, the hub's plain
+        # HTTP is not. The hub offers this file as a download beside the in-place /serial/.
+        # vite-plugin-singlefile is installed here only (--no-save), so the project's own
+        # build, package.json and lockfile are untouched. Config: .github/irate-box/.
+        run: |
+          npm install --no-save --no-audit --no-fund vite-plugin-singlefile
+          SINGLEFILE_OUT=/tmp/single npx vite build --config .github/irate-box/vite.singlefile.config.mjs
+          cp /tmp/single/index.html dist/serial-terminal.html
+          (cd dist && sha256sum serial-terminal.html > serial-terminal.html.sha256)
+          du -h dist/serial-terminal.html
       - name: Third-party notices
         # THIRD-PARTY-NOTICES.txt in the bundle: what npm does not describe first, then every
         # package installed under node_modules with its license text -- a superset of what the
