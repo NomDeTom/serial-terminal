@@ -46,8 +46,8 @@ jobs:
           out="dist/THIRD-PARTY-NOTICES.txt"
           {
             cat <<NOTICE
-          Meshtastic serial terminal and log analyser, GNU General Public License v3.0, built for the Irate-Box hub from ${{ github.repository }} at ${{ github.sha }}.
-          Source: https://github.com/${{ github.repository }}/tree/${{ github.sha }}
+          Meshtastic serial terminal and log analyser, GNU General Public License v3.0, built for the Irate-Box hub from ${{ github.repository }} at $(git rev-parse HEAD).
+          Source: https://github.com/${{ github.repository }}/tree/$(git rev-parse HEAD)
 
           NOTICE
             cat <<'NOTICE'
